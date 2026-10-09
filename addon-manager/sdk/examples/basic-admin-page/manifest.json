@@ -1,0 +1,47 @@
+{
+  "manifestVersion": 1,
+  "id": "example.demo",
+  "name": "Addon Demo",
+  "version": "1.0.0",
+  "description": "Addon Demo SDK development example.",
+  "compatibility": {
+    "manager": "^2.0",
+    "php": ">=8.2 <9.0",
+    "panel": "=1.15.1"
+  },
+  "dependencies": [],
+  "incompatible": [],
+  "files": [
+    {
+      "source": "payload/index.blade.php",
+      "target": "resources/views/addons/example_demo/index.blade.php",
+      "sha256": "b52b8d947f59b3d0cd48c05cf7f54aa8ac497678f3e4238002adb03b0887420b"
+    }
+  ],
+  "patches": [],
+  "extensions": {
+    "pages": [
+      {
+        "id": "status",
+        "path": "status",
+        "title": "Addon Demo",
+        "view": "addons.example_demo.index",
+        "permission": "admin"
+      }
+    ],
+    "menus": [
+      {
+        "id": "demo-menu",
+        "label": "Addon Demo",
+        "page": "status"
+      }
+    ]
+  },
+  "database": {
+    "dataPolicy": "preserve",
+    "migrations": []
+  },
+  "build": {
+    "mode": "none"
+  }
+}

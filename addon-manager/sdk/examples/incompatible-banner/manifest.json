@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 1,
+  "id": "example.demo-conflict",
+  "name": "Demo Incompatible Banner",
+  "version": "1.0.0",
+  "description": "Demo Incompatible Banner SDK development example.",
+  "compatibility": {
+    "manager": "^2.0",
+    "php": ">=8.2 <9.0",
+    "panel": "=1.15.1"
+  },
+  "dependencies": [
+    {
+      "id": "example.demo",
+      "version": "=1.0.0"
+    }
+  ],
+  "incompatible": [
+    {
+      "id": "example.demo-banner",
+      "version": "*"
+    }
+  ],
+  "files": [],
+  "patches": [
+    {
+      "id": "replace-demo-message",
+      "target": "resources/views/addons/example_demo/index.blade.php",
+      "owner": "addon:example.demo",
+      "find": "patches/find.txt",
+      "replace": "patches/replace.txt",
+      "beforeSha256": "98d981fc725bbd9ea4e7e632b0b2657d1bb3ceeedf912e7cd6b064056baf5299",
+      "afterSha256": "ef029adec6308c01bc7c3ea6a8b9ce73e8077143d118e05d12bf6affd0841ec5"
+    }
+  ],
+  "extensions": {},
+  "database": {
+    "dataPolicy": "preserve",
+    "migrations": []
+  },
+  "build": {
+    "mode": "none"
+  }
+}

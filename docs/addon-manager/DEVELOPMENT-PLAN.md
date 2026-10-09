@@ -1,27 +1,33 @@
-# Konnect Addon Manager development plan
+# Addon Manager development plan
 
-Status: approved design requirements consolidated into a development plan. The
-manager has not been implemented. This document defines the intended product,
-implementation order, and acceptance criteria.
+Status: the implementation is complete as a development candidate; the
+neutral distribution is Addon Manager 2.0.0. This document preserves the design
+and acceptance criteria. Manifest format version 1 remains supported; manager
+2.0.0 is a breaking API release and requires matching package compatibility.
+The [administrator guide](../../addon-manager/docs/ADMINISTRATOR.md),
+[developer guide](../../addon-manager/docs/DEVELOPER.md), and
+[verification record](../../addon-manager/docs/VERIFICATION.md) define the
+implemented contract, tested fixtures, and remaining production limitations.
 
 ## 1. Product and compatibility target
 
-Deliver one folder, `konnect-addon-manager/`, that can be copied or downloaded
+Deliver one folder, `addon-manager/`, that can be copied or downloaded
 into an existing, working Pterodactyl panel and installed with one initial PHP
 command. After that, administrators install addons from GitHub links through the
 panel without FTP, uploading the full repository, or manually placing files.
 
-The user will upgrade Panel, Arix Theme, and Arix Addon Pack before installing
-the manager. The repository supplies Panel v1.15.1, Theme v2.1.3, and Addon Pack
-v2.0.2 as development fixtures. These are not proof of the eventual server's
-versions or installed source. The initial installer must detect the real server
-configuration and select a tested compatibility adapter. An unknown version or
+The manager supports measured stock Panel v1.15.1 sources. Arix Theme v2.1.3
+and Addon Pack v2.0.2 are optional fixture profiles, not prerequisites. These
+fixtures are not proof of a server's versions or installed source. Other
+versions need tested adapters. The initial installer detects the real server
+configuration and selects a supported source adapter; an unknown version or
 unexpected source fingerprint stops installation with a useful report.
 
 The repository's Arix and Addon Pack payloads remain under version folders;
 their presence does not mean the theme and pack have been activated. Capture
-the baseline from a functioning installation with those products already
-installed. Do not reconstruct a user's live server from the vanilla Git tree.
+the baseline from the functioning installed source, with any intended theme
+and pack already activated. Do not reconstruct a user's live server from the
+vanilla Git tree.
 
 Relevant integration points inspected:
 
@@ -41,10 +47,10 @@ and Node >=22; the older `BUILDING.md` tool versions are not authoritative.
 
 ## 2. Deliverables and folder layout
 
-Proposed release layout:
+Distribution layout:
 
 ```text
-konnect-addon-manager/
+addon-manager/
   install.php                    # Standalone initial installer
   bootstrap.php                  # Manager namespace/provider bootstrap
   bin/manager.php                # Doctor, recovery, and maintenance commands
@@ -59,7 +65,7 @@ konnect-addon-manager/
   README.md
 ```
 
-Private state defaults to `storage/app/konnect-addon-manager/` and contains
+Private state defaults to `storage/app/addon-manager/` and contains
 frozen packages, baseline code, staging builds, backups, journals, and recovery
 metadata. Its public assets have a separate controlled deployment destination.
 State must never be placed in `storage/app/public/` or another served directory.
@@ -69,15 +75,18 @@ enumerates every subdirectory there as a potential version payload. Panel also
 has an executable `addons/*/hooks/<event>` lifecycle mechanism. Neither is the
 new manager's registry. Existing game-server plugin tables are also separate.
 
-The proposed initial command is:
+The initial command is:
 
 ```sh
-php konnect-addon-manager/install.php --panel-root=/var/www/pterodactyl
+php addon-manager/install.php --panel-root=/var/www/pterodactyl
 ```
 
-This command is a design target, not an existing executable. Publish a release
-ZIP containing only this folder and document downloading/extracting it through
-SSH as an alternative to copying it. No production Git checkout is required.
+The release ZIP contains only this folder. Download and extract a reviewed
+release through SSH as an alternative to copying it; no production Git checkout
+is required. Use a fresh distribution and follow the
+[upgrade guide](../../addon-manager/docs/UPGRADING.md) before replacing an older
+manager. Active legacy registration or state is refused; automatic migration
+is outside version 2.0.0.
 
 The installer must be repeatable. It checks PHP/extensions, panel bootability,
 database connectivity, writable destinations, disk space, queue/worker setup,
@@ -89,7 +98,7 @@ setup instruction, not unrestricted sudo access from the web application.
 
 ## 3. Admin experience
 
-Expose an **Addon Manager** navigation entry and `/admin/konnect-addons` page.
+Expose an **Addon Manager** navigation entry and `/admin/addon-manager` page.
 Use the existing admin session, root-admin check, two-factor requirement, and
 CSRF protection for the page and every management endpoint. The manager must
 not depend on Arix's obfuscated controllers or alter Arix license enforcement.
@@ -109,8 +118,8 @@ Blocked packages show a concrete reason, including affected addons and paths.
 
 Disable/delete of a dependency must identify all affected dependents. Block the
 action or offer an explicit combined action; do not silently disable unrelated
-addons. Delete preserves addon data by default. Data purge is a separate action
-with its own consequences and confirmation.
+addons. Delete preserves addon data. A data-purge operation is outside the v1
+runtime contract.
 
 Long operations run in a dedicated management worker, not an HTTP request or
 the regular game-server task queue. Return an operation ID immediately; poll
@@ -153,7 +162,7 @@ fields before applying code:
 | Field group | Required information |
 | --- | --- |
 | Identity | Stable addon ID, version, display name, manifest format |
-| Compatibility | Manager, Panel, Arix, PHP, frontend-contract version ranges |
+| Compatibility | Manager, Panel and PHP ranges; optional Arix and Addon Pack ranges |
 | Relationships | Dependencies with version ranges; explicit incompatibilities |
 | Files | Payload paths, exact destinations, ownership, checksums |
 | Patches | Target owner/version, file, unique source fragment/context, expected fragment checksum, replacement/patch, expected result |
@@ -161,23 +170,22 @@ fields before applying code:
 | Build | Supported build mode, inputs, generated-output locations |
 | Database | Supported schema operations, migration IDs/checksums, data policy |
 
-Illustrative patch declaration, to be finalized with the schema in milestone 1:
+Illustrative manifest fragment using the implemented patch contract:
 
 ```json
 {
-  "id": "konnect.dashboard-extension",
+  "id": "example.dashboard-extension",
   "version": "1.0.0",
   "manifestVersion": 1,
-  "dependencies": [{ "id": "konnect.dashboard", "version": "^1.2" }],
+  "dependencies": [{ "id": "example.dashboard", "version": "^1.2" }],
   "patches": [{
     "id": "extend-dashboard-summary",
-    "target": {
-      "owner": "addon:konnect.dashboard",
-      "version": "^1.2",
-      "path": "app/Services/KonnectDashboard/SummaryService.php"
-    },
-    "expectedFragmentSha256": "<checksum of the uniquely matched original fragment>",
-    "patch": "patches/dashboard-summary.patch"
+    "target": "app/Addons/ExampleDashboard/SummaryService.php",
+    "owner": "addon:example.dashboard",
+    "find": "patches/find.txt",
+    "replace": "patches/replace.txt",
+    "beforeSha256": "<SHA-256 of exact find.txt bytes>",
+    "afterSha256": "<SHA-256 of exact replace.txt bytes>"
   }]
 }
 ```
@@ -199,9 +207,9 @@ parent patch operation, touched paths, actual pre/post file and fragment hashes,
 patch bytes, generated files, migration history, and validation results. Keep
 protected original blobs/checkpoints for auditing and recovery.
 
-Suggested registry tables: `konnect_addons`, `konnect_addon_versions`,
-`konnect_addon_operations`, `konnect_addon_dependencies`,
-`konnect_addon_file_changes`, and `konnect_addon_migrations`. Maintain a durable
+Manager registry tables: `addon_manager_addons`, `addon_manager_addon_versions`,
+`addon_manager_addon_operations`, `addon_manager_addon_dependencies`,
+`addon_manager_addon_file_changes`, and `addon_manager_addon_migrations`. Maintain a durable
 filesystem recovery record as well, so database or Laravel boot failure does
 not prevent recovering an interrupted deployment.
 
@@ -236,8 +244,8 @@ Operation pipeline:
 Staging must not execute addon code with production credentials. Integration
 validation uses synthetic configuration and disposable test state. Syntax and
 manifest checks alone cannot establish functional compatibility.
-Code-executing builds and tests require a supported isolated runner: a container
-or appropriately restricted OS account with filesystem and network controls.
+Code-executing builds and tests require the supported rootless Docker runner
+with enforced filesystem, network, and resource controls.
 It must have no live-code write access, production secret access, production
 database access, or privileged host socket mounts. Merely clearing environment
 variables while running as the Panel's OS user is insufficient. The initial
@@ -300,10 +308,10 @@ reverses data changes or remote actions.
 
 ## 8. Extension surface and frontend modes
 
-Support both ordinary registered extensions and controlled source patches.
-Provide hooks for admin/client pages, navigation, server tabs, dashboard widgets,
-API endpoints, events, jobs and schedules. Permissions for client/server features
-must use the Panel's existing authorization model, not just frontend visibility.
+V1 supports registered admin pages, menus and API routes, events, jobs,
+schedules, and controlled source patches. Client pages, server tabs, dashboard
+widgets and an embedded React bridge remain future design work. Any future
+client/server extension must use the Panel's existing authorization model.
 
 Standalone pages ship prebuilt assets and can avoid rebuilding the host panel.
 Components embedded in native React pages need a versioned bridge contract for
@@ -365,8 +373,9 @@ versions will work. Its job is to reject incompatible combinations safely.
 | 5. Activation and extensions | Journal/lock, crash recovery, safe schema steps, frontend bridge/build profiles, job shutdown | End-to-end lifecycle passes on the supported Panel/Arix/Pack combination, including injected failures |
 | 6. Release | Manager-only ZIP, checksums, bootstrap/service instructions, developer guides and example addon release | Install manager on a fresh server fixture, install/update/remove addons solely through admin URLs, recover after an interrupted activation |
 
-The first supported release must include milestones 1-6; UI-only or upload-only
-delivery does not satisfy the agreed lifecycle requirements. Private sources,
+The implementation covers the v1 contract across milestones 1-6. Embedded
+frontend bridges and additional service/source adapters remain future work;
+the verification record documents limits. Private sources,
 arbitrary migration hooks, obfuscated-code patching, multi-server coordinated
 deployments, and arbitrary dependency installers are explicitly outside v1.
 

@@ -1,0 +1,39 @@
+{
+  "manifestVersion": 1,
+  "id": "example.demo-banner",
+  "name": "Demo Dependency Banner",
+  "version": "1.0.0",
+  "description": "Demo Dependency Banner SDK development example.",
+  "compatibility": {
+    "manager": "^2.0",
+    "php": ">=8.2 <9.0",
+    "panel": "=1.15.1"
+  },
+  "dependencies": [
+    {
+      "id": "example.demo",
+      "version": "=1.0.0"
+    }
+  ],
+  "incompatible": [],
+  "files": [],
+  "patches": [
+    {
+      "id": "replace-demo-message",
+      "target": "resources/views/addons/example_demo/index.blade.php",
+      "owner": "addon:example.demo",
+      "find": "patches/find.txt",
+      "replace": "patches/replace.txt",
+      "beforeSha256": "98d981fc725bbd9ea4e7e632b0b2657d1bb3ceeedf912e7cd6b064056baf5299",
+      "afterSha256": "2c4bda81a118bcea6676b4659d5c949b6740802701a39b01ae4c598ab32b1439"
+    }
+  ],
+  "extensions": {},
+  "database": {
+    "dataPolicy": "preserve",
+    "migrations": []
+  },
+  "build": {
+    "mode": "none"
+  }
+}

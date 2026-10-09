@@ -1,1 +1,0 @@
-<p id="konnect-demo-message">The alternative incompatible banner is enabled.</p>

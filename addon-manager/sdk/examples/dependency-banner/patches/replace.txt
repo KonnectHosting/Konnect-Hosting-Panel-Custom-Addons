@@ -1,0 +1,1 @@
+<p id="addon-manager-demo-message">The demo extension and its dependency banner are enabled.</p>
