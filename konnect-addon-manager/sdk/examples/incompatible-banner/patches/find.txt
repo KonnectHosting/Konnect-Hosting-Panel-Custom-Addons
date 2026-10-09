@@ -1,0 +1,1 @@
+<p id="konnect-demo-message">The demo extension is enabled.</p>
