@@ -44,6 +44,10 @@ The addon installer uses the theme's `language:compile` command, so install the
 theme first. The installers verify licenses, copy the selected version's payload
 into the panel, migrate the database, install JavaScript dependencies, build
 assets, and refresh caches. The theme installer also downloads additional admin
-controllers from Arix. These activation steps have not been run by this upload.
+controllers from Arix. Those 13 controllers are also included in
+`app/Http/Controllers/Admin/Arix/`; their download provenance and checksums are
+recorded in [ADMIN-CONTROLLERS.md](ADMIN-CONTROLLERS.md). The installer may
+replace them with fresh downloads. These activation steps have not been run
+by this upload.
 
 Refer to the original readmes for troubleshooting and vendor support.
