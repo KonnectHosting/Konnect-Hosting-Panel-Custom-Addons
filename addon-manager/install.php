@@ -14,6 +14,9 @@ try {
         fwrite(STDOUT, "Usage: php addon-manager/install.php --panel-root=/path/to/panel [--dry-run] [--config=/path/to/host-settings.json]\n       php addon-manager/install.php --panel-root=/path/to/panel --recover-bootstrap\n");
         exit(0);
     }
+    if (isset($options['recover-bootstrap']) && (isset($options['dry-run']) || isset($options['config']))) {
+        throw new RuntimeException('Bootstrap recovery cannot be combined with --dry-run or --config.');
+    }
     $root = realpath((string) ($options['panel-root'] ?? dirname(__DIR__)));
     if ($root === false || !is_dir($root)) {
         throw new RuntimeException('The selected Panel root is not a real directory.');
@@ -21,9 +24,14 @@ try {
     if (isset($options['recover-bootstrap'])) {
         $result = (new BootstrapInstaller($root))->restore();
     } else {
-        $configuration = isset($options['config']) ? json_decode((string) file_get_contents($options['config']), true, 64, JSON_THROW_ON_ERROR) : [];
-        if (!is_array($configuration)) {
-            throw new RuntimeException('Host configuration must be a JSON object.');
+        $configuration = [];
+        if (isset($options['config'])) {
+            $bytes = file_get_contents($options['config']);
+            if ($bytes === false) throw new RuntimeException('Cannot read host configuration.');
+            if (!(json_decode($bytes, false, 64, JSON_THROW_ON_ERROR) instanceof stdClass)) {
+                throw new RuntimeException('Host configuration must be a JSON object.');
+            }
+            $configuration = json_decode($bytes, true, 64, JSON_THROW_ON_ERROR);
         }
         $result = (new Installer($root))->run(isset($options['dry-run']), $configuration);
     }

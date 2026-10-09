@@ -51,6 +51,39 @@ function addonManagerPrint(array $value): void
     fwrite(STDOUT, json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n");
 }
 
+/** Reject unused options before booting or changing the Panel. */
+function addonManagerValidateCommand(string $command, array $options): void
+{
+    $supported = [
+        'doctor' => [],
+        'worker' => ['once'],
+        'recover' => ['operation'],
+        'readiness' => ['candidate-registry'],
+        'install' => ['url', 'package-root', 'request-id'],
+        'update' => ['addon-id', 'url', 'package-root', 'request-id'],
+        'enable' => ['addon-id', 'request-id'],
+        'disable' => ['addon-id', 'cascade', 'request-id'],
+        'delete' => ['addon-id', 'cascade', 'request-id'],
+        'operation' => ['operation'],
+    ];
+    if (!array_key_exists($command, $supported)) {
+        throw new RuntimeException('Unknown command. Use --help for supported commands.');
+    }
+    $unused = array_diff(array_keys($options), ['panel-root', 'help', ...$supported[$command]]);
+    if ($unused !== []) {
+        throw new RuntimeException('Unsupported option for ' . $command . ': --' . implode(', --', $unused));
+    }
+    if ($command === 'operation' && !isset($options['operation'])) {
+        throw new RuntimeException('--operation is required.');
+    }
+    if (in_array($command, ['update', 'enable', 'disable', 'delete'], true) && !isset($options['addon-id'])) {
+        throw new RuntimeException('--addon-id is required.');
+    }
+    if (in_array($command, ['install', 'update'], true) && (int) isset($options['url']) + (int) isset($options['package-root']) !== 1) {
+        throw new RuntimeException('Provide exactly one --url or --package-root.');
+    }
+}
+
 function addonManagerHeartbeat(string $stateRoot, string $status): void
 {
     $file = $stateRoot . '/worker-heartbeat.json';
@@ -64,9 +97,10 @@ function addonManagerHeartbeat(string $stateRoot, string $status): void
 try {
     [$command, $options] = addonManagerArguments(array_slice($argv, 1));
     if (isset($options['help'])) {
-        fwrite(STDOUT, "Usage: php addon-manager/bin/manager.php <command> --panel-root=/path\nCommands:\n  doctor                   Host and deployment diagnostics\n  worker [--once]          Dedicated durable-operation worker\n  recover [--operation=id] Standalone file recovery; no Panel/Laravel boot\n  readiness                Independent host boot/database/route probe\n  install --url=URL         Queue GitHub addon installation\n  update --addon-id=ID --url=URL\n  enable|disable|delete --addon-id=ID [--cascade]\n  operation --operation=ID\nLocal CLI installs may use --package-root=/path instead of --url.\n");
+        fwrite(STDOUT, "Usage: php addon-manager/bin/manager.php <command> --panel-root=/path\nCommands:\n  doctor                   Host and deployment diagnostics\n  worker [--once]          Dedicated durable-operation worker\n  recover [--operation=id] Standalone file recovery; no Panel/Laravel boot\n  readiness                Independent host boot/database/route probe\n  install --url=URL         Queue GitHub addon installation\n  update --addon-id=ID --url=URL\n  enable --addon-id=ID\n  disable|delete --addon-id=ID [--cascade]\n  operation --operation=ID\nLocal CLI installs and updates may use --package-root=/path instead of --url.\nLifecycle commands accept --request-id=ID to safely retry the same request.\n");
         exit(0);
     }
+    addonManagerValidateCommand($command, $options);
     $root = realpath($options['panel-root'] ?? dirname(__DIR__, 2));
     if ($root === false || !is_dir($root)) {
         throw new RuntimeException('Panel root must be a real directory.');

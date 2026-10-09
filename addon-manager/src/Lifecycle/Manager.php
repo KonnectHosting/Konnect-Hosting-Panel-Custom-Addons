@@ -74,7 +74,17 @@ final class Manager
             }
             $baselineId = hash('sha256', json_encode(['host' => $host, 'inventory' => $inventory], JSON_THROW_ON_ERROR));
             $baselineRoot = $this->stateRoot . '/baselines/' . $baselineId . '/files';
+            if (is_dir($baselineRoot)) {
+                foreach (Files::inventory($baselineRoot) as $path => $digest) {
+                    if (($inventory[$path] ?? null) !== $digest) {
+                        throw new RuntimeException("Interrupted baseline contains unexpected source: {$path}; preserve it for review before retrying initialization.");
+                    }
+                }
+            }
             Files::copyInventory($this->panelRoot, $baselineRoot, $inventory);
+            if (Files::inventory($baselineRoot) !== $inventory) {
+                throw new RuntimeException('Baseline snapshot differs from its captured source inventory; initialization was not committed.');
+            }
             $this->assertLiveInventory($inventory);
             Files::writeJson(dirname($baselineRoot) . '/metadata.json', ['id' => $baselineId, 'host' => $host, 'inventory' => $inventory, 'createdAt' => gmdate(DATE_ATOM)]);
             $registry = [
@@ -122,58 +132,57 @@ final class Manager
     public function enqueue(string $action, array $arguments, string $actor = 'cli', ?string $requestId = null): array
     {
         $this->registry();
-        $this->assertNoRecovery(true);
         if (!in_array($action, ['install', 'update', 'enable', 'disable', 'delete'], true)) {
-            throw new RuntimeException('Unsupported lifecycle action.');
+            throw new EnqueueRejectedException('Unsupported lifecycle action.');
         }
         foreach ($arguments as $key => $value) {
             if (!in_array($key, ['url', 'packageRoot', 'addonId', 'cascade', 'expectedAffectedIds'], true)) {
-                throw new RuntimeException("Unsupported operation argument: {$key}");
+                throw new EnqueueRejectedException("Unsupported operation argument: {$key}");
             }
         }
         if (in_array($action, ['install', 'update'], true)) {
             if ((isset($arguments['url']) ? 1 : 0) + (isset($arguments['packageRoot']) ? 1 : 0) !== 1) {
-                throw new RuntimeException('Provide exactly one GitHub URL or local packageRoot.');
+                throw new EnqueueRejectedException('Provide exactly one GitHub URL or local packageRoot.');
             }
             foreach (['url', 'packageRoot'] as $key) {
                 if (isset($arguments[$key]) && (!is_string($arguments[$key]) || $arguments[$key] === '' || strlen($arguments[$key]) > 4096)) {
-                    throw new RuntimeException("Invalid {$key}.");
+                    throw new EnqueueRejectedException("Invalid {$key}.");
                 }
             }
             if (isset($arguments['url'])) {
                 $url = parse_url($arguments['url']);
                 if ($url === false || isset($url['user']) || isset($url['pass'])) {
-                    throw new RuntimeException('Package URLs cannot contain credentials.');
+                    throw new EnqueueRejectedException('Package URLs cannot contain credentials.');
                 }
             }
         }
         if (($action !== 'install' && !isset($arguments['addonId'])) || (isset($arguments['addonId']) && (!is_string($arguments['addonId']) || !preg_match('/^[a-z0-9][a-z0-9._-]{1,127}$/D', $arguments['addonId'])))) {
-            throw new RuntimeException('A valid addonId is required.');
+            throw new EnqueueRejectedException('A valid addonId is required.');
         }
         if (isset($arguments['cascade']) && !is_bool($arguments['cascade'])) {
-            throw new RuntimeException('cascade must be a boolean.');
+            throw new EnqueueRejectedException('cascade must be a boolean.');
         }
         if (isset($arguments['expectedAffectedIds'])) {
             $ids = $arguments['expectedAffectedIds'];
             if (!in_array($action, ['disable', 'delete'], true) || !is_array($ids) || !array_is_list($ids) || $ids === [] || count($ids) > 1000) {
-                throw new RuntimeException('expectedAffectedIds must be a nonempty list for disable/delete.');
+                throw new EnqueueRejectedException('expectedAffectedIds must be a nonempty list for disable/delete.');
             }
             foreach ($ids as $id) {
                 if (!is_string($id) || !preg_match('/^[a-z0-9][a-z0-9._-]{1,127}$/D', $id)) {
-                    throw new RuntimeException('Invalid expected affected addon ID.');
+                    throw new EnqueueRejectedException('Invalid expected affected addon ID.');
                 }
             }
             if (count(array_unique($ids, SORT_STRING)) !== count($ids)) {
-                throw new RuntimeException('expectedAffectedIds cannot contain duplicates.');
+                throw new EnqueueRejectedException('expectedAffectedIds cannot contain duplicates.');
             }
             sort($ids, SORT_STRING);
             $arguments['expectedAffectedIds'] = $ids;
         }
         if ($requestId !== null && ($requestId === '' || strlen($requestId) > 200 || preg_match('/[\x00-\x1f]/', $requestId))) {
-            throw new RuntimeException('Invalid idempotency requestId.');
+            throw new EnqueueRejectedException('Invalid idempotency requestId.');
         }
         if ($actor === '' || strlen($actor) > 255) {
-            throw new RuntimeException('Invalid operation actor.');
+            throw new EnqueueRejectedException('Invalid operation actor.');
         }
         ksort($arguments, SORT_STRING);
         $lock = Files::lock($this->stateRoot . '/queue.lock');
@@ -181,9 +190,13 @@ final class Manager
             $requestPath = $requestId === null ? null : $this->stateRoot . '/requests/' . hash('sha256', $actor . "\0" . $requestId) . '.json';
             if ($requestPath !== null && is_file($requestPath)) {
                 $request = Files::json($requestPath);
+                if (!is_string($request['operationId'] ?? null)) {
+                    throw new RuntimeException('Invalid idempotency request index.');
+                }
                 $existing = $this->operation($request['operationId']);
+                $this->assertReplayReceipt($existing, $actor, $requestId);
                 if ($existing['action'] !== $action || $existing['arguments'] !== $arguments) {
-                    throw new RuntimeException('requestId was already used for different operation arguments.');
+                    throw new EnqueueRejectedException('requestId was already used for different operation arguments.');
                 }
                 return $existing;
             }
@@ -191,14 +204,18 @@ final class Manager
             if ($requestId !== null) {
                 foreach ($this->operations() as $existing) {
                     if ($existing['actor'] === $actor && $existing['requestId'] === $requestId) {
+                        $this->assertReplayReceipt($existing, $actor, $requestId);
                         if ($existing['action'] !== $action || $existing['arguments'] !== $arguments) {
-                            throw new RuntimeException('requestId was already used for different operation arguments.');
+                            throw new EnqueueRejectedException('requestId was already used for different operation arguments.');
                         }
                         Files::writeJson($requestPath, ['operationId' => $existing['id']]);
                         return $existing;
                     }
                 }
             }
+            // A replay reads the original durable result even when its operation
+            // needs recovery. Only creation of a new mutation is blocked.
+            $this->assertNoRecovery(true);
             $queue = Files::json($this->stateRoot . '/queue-sequence.json', ['next' => 1]);
             $sequence = $queue['next'];
             if (!is_int($sequence) || $sequence < 1 || $sequence === PHP_INT_MAX) {
@@ -215,7 +232,7 @@ final class Manager
             if (in_array($action, ['disable', 'delete'], true)) {
                 $operation['approval'] = $this->cascadeApproval($this->registry()['addons'], $action, $arguments);
                 if (isset($arguments['expectedAffectedIds']) && $arguments['expectedAffectedIds'] !== $operation['approval']['affectedIds']) {
-                    throw new RuntimeException('Affected addons changed since the action preview. Reload the addon list and review the current IDs: ' . implode(', ', $operation['approval']['affectedIds']));
+                    throw new EnqueueRejectedException('Affected addons changed since the action preview. Reload the addon list and review the current IDs: ' . implode(', ', $operation['approval']['affectedIds']));
                 }
             }
             $this->saveOperation($operation);
@@ -239,7 +256,18 @@ final class Manager
         if ($lock === null) {
             return null;
         }
+        $installerLock = null;
         try {
+            // Initial installation publishes its registry before its readiness
+            // checks finish. Do not start queued work until that installer exits.
+            $installerPath = $this->stateRoot . '/installer-backups/install.lock';
+            Files::noLinks($installerPath);
+            if (file_exists($installerPath)) {
+                $installerLock = Files::lock($installerPath, false);
+                if ($installerLock === null) {
+                    return null;
+                }
+            }
             $this->assertNoRecovery();
             $operation = null;
             foreach ($this->operations() as $candidate) {
@@ -362,6 +390,9 @@ final class Manager
             $this->observeOperation($operation);
             return $operation;
         } finally {
+            if (is_resource($installerLock)) {
+                fclose($installerLock);
+            }
             fclose($lock);
         }
     }
@@ -422,7 +453,7 @@ final class Manager
         }
     }
 
-    public function doctor(): array
+    public function doctor(array $sourceRepairs = []): array
     {
         $checks = [];
         $check = static function (string $name, callable $test) use (&$checks): void {
@@ -463,9 +494,10 @@ final class Manager
             }
             return 'Protected baseline matches its recorded inventory.';
         });
-        $check('source-drift', function (): string {
-            $this->assertLiveInventory($this->registry()['activeInventory']);
-            return 'Active managed source matches its recorded inventory.';
+        $check('source-drift', function () use ($sourceRepairs): string {
+            $this->assertLiveInventory($this->registry()['activeInventory'], $sourceRepairs);
+            return $sourceRepairs === [] ? 'Active managed source matches its recorded inventory.'
+                : 'Prospective planned registration matches the recorded active inventory; live files have not been repaired.';
         });
         $check('recovery', function (): string {
             $this->assertNoRecovery();
@@ -737,7 +769,7 @@ final class Manager
     private function currentHost(array $baselineHost): array
     {
         $baselineHost['php'] = PHP_VERSION;
-        $baselineHost['manager'] = defined('ADDON_MANAGER_VERSION') ? (string) ADDON_MANAGER_VERSION : '2.0.0';
+        $baselineHost['manager'] = defined('ADDON_MANAGER_VERSION') ? (string) ADDON_MANAGER_VERSION : '2.0.1';
         return $baselineHost;
     }
 
@@ -849,9 +881,21 @@ final class Manager
         return Files::inventory($this->panelRoot, array_merge($exclude, $this->config['baselineExclude'] ?? []), true);
     }
 
-    private function assertLiveInventory(array $expected): void
+    private function assertLiveInventory(array $expected, array $sourceRepairs = []): void
     {
         $actual = $this->liveInventory();
+        foreach ($sourceRepairs as $path => $repair) {
+            if (!in_array($path, ['bootstrap/app.php', 'resources/views/layouts/admin.blade.php'], true)
+                || !is_array($repair) || count($repair) !== 2
+                || array_diff(array_keys($repair), ['beforeSha256', 'afterSha256']) !== []
+                || !is_string($repair['beforeSha256'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $repair['beforeSha256'])
+                || !is_string($repair['afterSha256'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $repair['afterSha256'])
+                || ($actual[$path] ?? null) !== $repair['beforeSha256']
+                || ($expected[$path] ?? null) !== $repair['afterSha256']) {
+                throw new RuntimeException('Invalid prospective planned registration repair: ' . $path . '. Require the exact live before hash and recorded active after hash for a registration file.');
+            }
+            $actual[$path] = $repair['afterSha256'];
+        }
         if ($actual !== $expected) {
             $changed = [];
             foreach (array_unique([...array_keys($expected), ...array_keys($actual)]) as $path) {
@@ -859,7 +903,8 @@ final class Manager
                     $changed[] = $path;
                 }
             }
-            throw new RuntimeException('Live source drift blocks reconstruction: ' . implode(', ', array_slice($changed, 0, 20)) . (count($changed) > 20 ? ' …' : '') . '. Use a verified baseline maintenance/rebase workflow.');
+            $prefix = $sourceRepairs === [] ? 'Live source drift blocks reconstruction: ' : 'Prospective planned registration still has source drift: ';
+            throw new RuntimeException($prefix . implode(', ', array_slice($changed, 0, 20)) . (count($changed) > 20 ? ' …' : '') . '. Use a verified baseline maintenance/rebase workflow.');
         }
     }
 
@@ -899,6 +944,15 @@ final class Manager
         $operation['updatedAt'] = gmdate(DATE_ATOM);
         $operation['logs'][] = ['time' => $operation['updatedAt'], 'phase' => $phase, 'message' => $message];
         $this->saveOperation($operation);
+    }
+
+    private function assertReplayReceipt(array $operation, string $actor, string $requestId): void
+    {
+        if (!is_string($operation['action'] ?? null) || !in_array($operation['action'], ['install', 'update', 'enable', 'disable', 'delete'], true)
+            || !is_array($operation['arguments'] ?? null)
+            || ($operation['actor'] ?? null) !== $actor || ($operation['requestId'] ?? null) !== $requestId) {
+            throw new RuntimeException('Invalid durable idempotency operation receipt.');
+        }
     }
 
     private function saveOperation(array $operation): void

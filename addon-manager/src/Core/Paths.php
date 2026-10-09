@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace AddonManager\Core;
 
+use AddonManager\Storage\Files;
 use RuntimeException;
 
 final class Paths
@@ -25,7 +26,7 @@ final class Paths
     {
         $path = strtolower($path);
         foreach (explode('/', $path) as $part) {
-            if ($part === '.env' || str_starts_with($part, '.env.') || in_array($part, ['.git', '.svn', '.ssh', '.aws', '.codex', '.agents', 'vendor', 'node_modules', 'addon-manager'], true)) {
+            if (Files::sensitive($part) || in_array($part, ['.htaccess', '.user.ini', 'vendor', 'node_modules', 'addon-manager'], true)) {
                 return true;
             }
             if (in_array($part, ['composer.json','composer.lock','package.json','package-lock.json','yarn.lock','pnpm-lock.yaml','.npmrc','.yarnrc','.yarnrc.yml','.babelrc','.babelrc.json','.babelrc.js','.browserslistrc'], true) || preg_match('/^(?:(?:webpack|vite|rollup|postcss|babel|tailwind)\.config\.[cm]?[jt]s|tsconfig(?:\.[a-z0-9_-]+)?\.json|\.pnp\..+)$/', $part)) { return true; }

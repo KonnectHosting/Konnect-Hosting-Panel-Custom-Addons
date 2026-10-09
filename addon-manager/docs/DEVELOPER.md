@@ -5,7 +5,7 @@ payload bytes. They are data contracts, with no install/uninstall shell scripts,
 arbitrary SQL, executable migrations or package-manager hooks. Addon PHP that
 runs after activation has application privileges and must be trusted.
 
-Use the SDK from a fresh matching manager distribution. Manager 2.0.0 uses the
+Use the SDK from a fresh matching manager distribution. Manager 2.0.1 uses the
 `AddonManager` PHP namespace and `/admin/addon-manager` URLs. Earlier manager
 registration and active state are refused rather than migrated automatically;
 read [the upgrade guide](UPGRADING.md) before replacing an existing installation.
@@ -111,6 +111,13 @@ you access. Menu `page` references a page ID in the same addon. The provider use
 the existing web session, CSRF, two-factor and root-admin middleware. Requests
 check enabled addon/version state before loading the declared handler.
 
+Management API clients posting to `/admin/addon-manager/api/operations` must
+also send `X-Addon-Manager-Actor` with the authenticated administrator's exact
+decimal ID, in addition to the session and CSRF token. A missing or mismatched
+header is rejected before enqueue. Preserve the same `requestId` after an
+uncertain response; a changed account must not replay another account's pending
+request. The bundled manager UI implements this contract.
+
 Event declarations have `id`, event class `event`, `handler` in `Class@method`
 form and `permission: "system"`. Schedule declarations have `id`, `handler`,
 `frequency` (`everyMinute`, `hourly`, `daily`) and `permission: "system"`.
@@ -207,8 +214,9 @@ by `_`, for example `example_demo_settings`. Columns use `name`, `type` and
 optional `nullable`, `default`, `length`; supported types are `string`, `text`,
 `integer`, `bigInteger`, `boolean`, `timestamp` and `json`. `createTable` may
 declare `primary`; `createIndex` includes `name`, `columns` and optional
-`unique: false`. Unique indexes are rejected because a new uniqueness
-constraint could break writes from code restored during rollback.
+`unique: false`. A unique index is allowed only on a table created earlier in
+the same migration. Unique indexes on existing tables are rejected because a
+new constraint could break writes from code restored during rollback.
 The executor validates source checksums and immutable migration IDs.
 Defaults must match boolean, integer or string column types; `null` is allowed
 only for nullable columns. Text, timestamp and JSON defaults are unsupported.

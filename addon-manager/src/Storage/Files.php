@@ -24,6 +24,8 @@ final class Files
                 if (!chmod($part, $mode)) {
                     throw new RuntimeException("Cannot set directory permissions: {$part}");
                 }
+                self::syncDirectory($part);
+                self::syncDirectory(dirname($part));
             }
         }
     }
@@ -60,6 +62,9 @@ final class Files
     public static function read(string $path): string
     {
         self::noLinks($path);
+        if (!is_file($path)) {
+            throw new RuntimeException("Expected regular file: {$path}");
+        }
         $bytes = file_get_contents($path);
         if ($bytes === false) {
             throw new RuntimeException("Cannot read file: {$path}");
@@ -83,7 +88,7 @@ final class Files
         return $hash;
     }
 
-    public static function atomic(string $path, string $bytes, int $mode = 0600, ?string $temporary = null, ?callable $beforeRename = null): void
+    public static function atomic(string $path, string $bytes, int $mode = 0600, ?string $temporary = null, ?callable $beforeRename = null, ?callable $afterCreate = null): void
     {
         self::noLinks($path);
         self::directory(dirname($path));
@@ -96,8 +101,17 @@ final class Files
         if ($handle === false) {
             throw new RuntimeException("Cannot prepare atomic file: {$path}");
         }
+        $stat = fstat($handle);
+        $identity = $stat === false ? null : ['device' => $stat['dev'], 'inode' => $stat['ino']];
+        $prepared = false;
+        $digest = hash('sha256', $bytes);
         try {
-            chmod($temporary, $mode);
+            if ($identity === null || !chmod($temporary, $mode)) {
+                throw new RuntimeException("Cannot secure atomic file: {$path}");
+            }
+            if ($afterCreate !== null) {
+                $afterCreate($identity);
+            }
             $offset = 0;
             while ($offset < strlen($bytes)) {
                 $written = fwrite($handle, substr($bytes, $offset));
@@ -111,8 +125,13 @@ final class Files
             }
             fclose($handle);
             $handle = null;
+            $prepared = true;
             if ($beforeRename !== null) {
                 $beforeRename();
+            }
+            self::noLinks($path);
+            if (!self::sameFile($temporary, $identity) || self::hash($temporary) !== $digest) {
+                throw new RuntimeException("Atomic temporary file changed before activation: {$path}");
             }
             if (!rename($temporary, $path)) {
                 throw new RuntimeException("Cannot activate atomic file: {$path}");
@@ -122,26 +141,46 @@ final class Files
             if (is_resource($handle)) {
                 fclose($handle);
             }
-            if (is_file($temporary)) {
+            // A callback or another process may have replaced the pathname. Only
+            // remove the inode created here, and preserve unexpected prepared bytes.
+            if ($identity !== null && self::sameFile($temporary, $identity) && (!$prepared || self::hash($temporary) === $digest)) {
                 unlink($temporary);
             }
         }
     }
 
+    public static function sameFile(string $path, array $identity): bool
+    {
+        clearstatcache(true, $path);
+        $stat = @lstat($path);
+        return $stat !== false && ($stat['mode'] & 0170000) === 0100000
+            && $stat['nlink'] === 1
+            && $stat['dev'] === ($identity['device'] ?? null) && $stat['ino'] === ($identity['inode'] ?? null);
+    }
+
     public static function syncDirectory(string $directory): void
     {
-        if (function_exists('fsync')) {
-            $handle = @fopen($directory, 'r');
-            if (is_resource($handle)) {
-                @fsync($handle);
-                fclose($handle);
+        self::noLinks($directory);
+        if (!function_exists('fsync') || !is_dir($directory)) {
+            throw new RuntimeException("Cannot durably sync directory: {$directory}");
+        }
+        $handle = @fopen($directory, 'r');
+        if (!is_resource($handle)) {
+            throw new RuntimeException("Cannot open directory for durable sync: {$directory}");
+        }
+        try {
+            if (!@fsync($handle)) {
+                throw new RuntimeException("Cannot durably sync directory: {$directory}");
             }
+        } finally {
+            fclose($handle);
         }
     }
 
     public static function json(string $path, ?array $default = null): array
     {
-        if (!is_file($path) && $default !== null) {
+        self::noLinks($path);
+        if (!file_exists($path) && $default !== null) {
             return $default;
         }
         try {
@@ -180,10 +219,11 @@ final class Files
                         continue 2;
                     }
                 }
-                if ($filterSensitive && (preg_match('/^(?:\.env(?:\.|$)|\.aws$|\.ssh$|\.git$)/', $entry) || preg_match('/\.(?:pem|key|p12|pfx)$/i', $entry))) {
+                $path = $directory . '/' . $entry;
+                $credentialConfig = in_array(strtolower($entry), ['.npmrc', '.yarnrc', '.yarnrc.yml'], true);
+                if ($filterSensitive && self::sensitive($entry, $credentialConfig && is_file($path) ? self::read($path) : null)) {
                     continue;
                 }
-                $path = $directory . '/' . $entry;
                 self::noLinks($path);
                 if (is_dir($path)) {
                     $walk($path, $relative . '/');
@@ -197,6 +237,20 @@ final class Files
         $walk(rtrim($root, '/'), '');
         ksort($result, SORT_STRING);
         return $result;
+    }
+
+    /** Shared by baseline capture and runner intake; ordinary build config is retained. */
+    public static function sensitive(string $name, ?string $bytes = null): bool
+    {
+        $name = strtolower($name);
+        if ($name === '.env' || str_starts_with($name, '.env.')
+            || in_array($name, ['.git', '.svn', '.ssh', '.aws', '.docker', '.gnupg', '.kube', '.azure', '.codex', '.agents', '.netrc', '_netrc'], true)
+            || preg_match('/\.(?:pem|key|p12|pfx)$/', $name)) {
+            return true;
+        }
+        return $bytes !== null && in_array($name, ['.npmrc', '.yarnrc', '.yarnrc.yml'], true)
+            && (preg_match('/(?:^|[\s:\/"\x27])(?:_auth(?:token)?|_password|password|username|npmAuthToken|npmAuthIdent)["\x27]?\s*(?:[:=]|\s)/im', $bytes)
+                || preg_match('#https?://[^/\s]+@#i', $bytes));
     }
 
     public static function copyInventory(string $from, string $to, array $inventory): void
@@ -221,7 +275,10 @@ final class Files
         if ($handle === false) {
             throw new RuntimeException('Cannot open manager deployment lock.');
         }
-        chmod($path, 0600);
+        if (!chmod($path, 0600)) {
+            fclose($handle);
+            throw new RuntimeException('Cannot secure manager deployment lock.');
+        }
         if (!flock($handle, LOCK_EX | ($blocking ? 0 : LOCK_NB))) {
             fclose($handle);
             return null;

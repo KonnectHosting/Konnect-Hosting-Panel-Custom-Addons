@@ -38,6 +38,18 @@ $suite->test('sdk', 'repeat exports are identical and existing outputs cannot be
     });
 });
 
+$suite->test('sdk', 'validate and export both refuse symlinked package roots', function (): void {
+    temporary(function (string $root): void {
+        $source = package($root . '/package', manifest());
+        check(symlink($source, $root . '/linked'), 'Symlink fixture could not be constructed');
+        $script = dirname(__DIR__) . '/sdk/bin/addon.php';
+        same(1, phpCommand($script, ['validate', $root . '/linked'])['exit']);
+        $result = phpCommand($script, ['export', $root . '/linked', '--output=' . $root . '/addon.zip']);
+        same(1, $result['exit'], 'Export bypassed package-root symlink validation');
+        check(!file_exists($root . '/addon.zip') && !file_exists($root . '/addon.zip.sha256'), 'Rejected symlink export left publishable output');
+    });
+});
+
 foreach (['digest mismatch', 'undeclared payload'] as $case) {
     $suite->test('sdk', $case . ' fails export without producing an archive', function () use ($case): void {
         temporary(function (string $root) use ($case): void {
@@ -74,5 +86,32 @@ $suite->test('sdk', 'release ZIP contains only manager files and its checksum ve
         } finally { $archive->close(); }
         foreach (['install.php', 'bootstrap.php', 'bin/manager.php', 'public/build/manager.v1.js', 'public/build/manager.v1.css', 'schemas/addon.schema.json'] as $required) check(in_array('addon-manager/' . $required, $names, true), 'Manager release lacks ' . $required);
         same(count($names), count(array_unique($names)), 'Release contains duplicate paths');
+    });
+});
+
+$suite->test('sdk', 'release packaging omits credential filenames within distribution directories', function (): void {
+    temporary(function (string $root): void {
+        $manager = $root . '/manager';
+        foreach (['bin', 'src', 'routes', 'resources', 'public', 'schemas', 'adapters', 'migrations', 'sdk', 'docs', 'tools'] as $directory) {
+            check(mkdir($manager . '/' . $directory, 0700, true), 'Could not create release fixture directory');
+        }
+        foreach (['install.php', 'bootstrap.php', 'README.md', 'tools/package-release.php', 'tools/ZipBuilder.php', 'src/Storage/Files.php'] as $file) {
+            write($manager . '/' . $file, file_get_contents(dirname(__DIR__) . '/' . $file));
+        }
+        foreach (['_netrc', 'private.pem', 'private.KEY', 'certificate.p12', 'certificate.pfx'] as $name) {
+            write($manager . '/docs/' . $name, 'synthetic credential fixture');
+        }
+        write($manager . '/docs/guide.md', 'ordinary distribution documentation');
+        $output = $root . '/manager.zip';
+        $result = phpCommand($manager . '/tools/package-release.php', ['--output=' . $output]);
+        same(0, $result['exit'], $result['stderr']);
+        $archive = new ZipArchive();
+        same(true, $archive->open($output));
+        try {
+            same('ordinary distribution documentation', $archive->getFromName('addon-manager/docs/guide.md'));
+            foreach (['_netrc', 'private.pem', 'private.KEY', 'certificate.p12', 'certificate.pfx'] as $name) {
+                same(false, $archive->locateName('addon-manager/docs/' . $name), 'Release exposed credential fixture: ' . $name);
+            }
+        } finally { $archive->close(); }
     });
 });

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AddonManager\Installer;
 
+use AddonManager\Storage\Files;
 use RuntimeException;
 use Throwable;
 
@@ -11,6 +12,7 @@ final class BootstrapInstaller
 {
     private readonly string $managerRoot;
     private readonly string $stateRoot;
+    private $heldLock = null;
 
     public function __construct(private readonly string $panelRoot, ?string $managerRoot = null, ?string $stateRoot = null)
     {
@@ -28,13 +30,13 @@ final class BootstrapInstaller
                 continue;
             }
             if ($relative === 'bootstrap/app.php') {
-                $needle = 'return $app;';
+                $needle = SourceProfile::BOOTSTRAP_ANCHOR;
                 if (substr_count($original, $needle) !== 1) {
                     throw new RuntimeException('Bootstrap return anchor is not unique.');
                 }
                 $modified = str_replace($needle, SourceProfile::BOOTSTRAP_BLOCK . $needle, $original);
             } else {
-                $needle = "                    </ul>\n                </section>\n            </aside>";
+                $needle = SourceProfile::NAV_ANCHOR;
                 if (substr_count($original, $needle) !== 1) {
                     throw new RuntimeException('Admin sidebar anchor is not unique.');
                 }
@@ -47,39 +49,82 @@ final class BootstrapInstaller
 
     public function apply(): array
     {
-        $plan = $this->plan();
-        $backupRoot = $this->stateRoot . '/installer-backups';
-        $this->mkdir($backupRoot);
-        $lock = fopen($backupRoot . '/install.lock', 'c');
-        if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
-            throw new RuntimeException('Another initial installer is running.');
+        // Reject unsupported/legacy source before creating installer state.
+        $this->plan();
+        return $this->synchronized(fn (): array => $this->applyLocked());
+    }
+
+    /** Keep settings, bootstrap, readiness and recovery within one installer lock. */
+    public function synchronized(callable $action): mixed
+    {
+        if (is_resource($this->heldLock)) return $action();
+        $deployment = null;
+        Files::noLinks($this->stateRoot . '/registry.json');
+        // A repeated install/recovery must not overlap a source deployment.
+        // Initial installation has no registry and initializes it under the
+        // manager's own deployment lock, so that case must not lock it twice.
+        if (is_file($this->stateRoot . '/registry.json')) {
+            $deployment = Files::lock($this->stateRoot . '/deployment.lock', false);
+            if ($deployment === null) {
+                throw new RuntimeException('A manager deployment is running. Wait before installing or recovering bootstrap.');
+            }
         }
+        try {
+            $this->heldLock = $this->lock();
+            try {
+                return $action();
+            } finally {
+                flock($this->heldLock, LOCK_UN);
+                fclose($this->heldLock);
+                $this->heldLock = null;
+            }
+        } finally {
+            if (is_resource($deployment)) {
+                flock($deployment, LOCK_UN);
+                fclose($deployment);
+            }
+        }
+    }
+
+    private function applyLocked(): array
+    {
+        $backupRoot = $this->stateRoot . '/installer-backups';
         $applied = [];
         $backups = [];
         try {
             // Re-read under lock so two installers cannot duplicate the registration.
             $plan = $this->plan();
+            $previous = $this->record();
+            $backups = $previous['files'] ?? [];
+            foreach ($backups as $entry) {
+                if (Files::hash($entry['backup']) !== $entry['beforeSha256']) {
+                    throw new RuntimeException('Bootstrap backup is missing or modified.');
+                }
+            }
             foreach ($plan['changes'] as $relative => $change) {
                 $destination = $this->panelRoot . '/' . $relative;
                 if (hash_file('sha256', $destination) !== $change['beforeSha256']) {
                     throw new RuntimeException('Source changed during installation: ' . $relative);
                 }
                 $backup = $backupRoot . '/' . $change['beforeSha256'] . '.blob';
-                if (!is_file($backup)) {
+                $backupHash = Files::hash($backup);
+                if ($backupHash === null) {
                     $this->atomicWrite($backup, $change['before'], 0600);
+                } elseif ($backupHash !== $change['beforeSha256']) {
+                    throw new RuntimeException('Bootstrap backup is modified: ' . $relative);
                 }
                 $backups[$relative] = ['backup' => $backup, 'beforeSha256' => $change['beforeSha256'], 'afterSha256' => $change['afterSha256']];
             }
             $record = ['schemaVersion' => 1, 'profile' => $plan['profile']['id'], 'files' => $backups, 'status' => 'prepared', 'at' => gmdate('c')];
-            if ($backups !== []) {
+            if ($plan['changes'] !== []) {
                 $this->atomicWrite($backupRoot . '/registration.json', json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n", 0600);
             }
             foreach ($plan['changes'] as $relative => $change) {
                 $destination = $this->panelRoot . '/' . $relative;
-                $this->atomicWrite($destination, $change['after'], fileperms($destination) & 0777);
+                $this->atomicWrite($destination, $change['after'], fileperms($destination) & 0777, $change['beforeSha256']);
                 $applied[] = $relative;
             }
-            if ($backups !== []) {
+            if ($plan['changes'] !== []) {
                 $record['status'] = 'applied';
                 $this->atomicWrite($backupRoot . '/registration.json', json_encode($record, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n", 0600);
             }
@@ -87,27 +132,32 @@ final class BootstrapInstaller
         } catch (Throwable $e) {
             foreach (array_reverse($applied) as $relative) {
                 $destination = $this->panelRoot . '/' . $relative;
-                $this->atomicWrite($destination, $plan['changes'][$relative]['before'], fileperms($destination) & 0777);
+                $this->atomicWrite($destination, $plan['changes'][$relative]['before'], fileperms($destination) & 0777, $plan['changes'][$relative]['afterSha256']);
             }
             throw $e;
-        } finally {
-            flock($lock, LOCK_UN);
-            fclose($lock);
         }
     }
 
-    public function restore(): array
+    public function restore(?array $only = null): array
     {
         $recordPath = $this->stateRoot . '/installer-backups/registration.json';
+        Files::noLinks($recordPath);
         if (!is_file($recordPath)) {
             return ['restored' => []];
         }
-        $record = json_decode((string) file_get_contents($recordPath), true, 512, JSON_THROW_ON_ERROR);
+        if ($only !== null && array_diff($only, ['bootstrap/app.php', 'resources/views/layouts/admin.blade.php']) !== []) {
+            throw new RuntimeException('Unexpected bootstrap recovery selection.');
+        }
+        return $this->synchronized(fn (): array => $this->restoreLocked($only));
+    }
+
+    private function restoreLocked(?array $only): array
+    {
+        $record = $this->record();
+        if ($record === null) return ['restored' => []];
         $prepared = [];
         foreach ($record['files'] as $relative => $entry) {
-            if (!in_array($relative, ['bootstrap/app.php', 'resources/views/layouts/admin.blade.php'], true) || !preg_match('/^[a-f0-9]{64}$/D', $entry['beforeSha256'] ?? '') || !preg_match('/^[a-f0-9]{64}$/D', $entry['afterSha256'] ?? '') || ($entry['backup'] ?? null) !== $this->stateRoot . '/installer-backups/' . $entry['beforeSha256'] . '.blob') {
-                throw new RuntimeException('Unexpected bootstrap backup recovery record.');
-            }
+            if ($only !== null && !in_array($relative, $only, true)) continue;
             (new SourceProfile())->assertNoSymlinks($this->panelRoot, $relative);
             (new SourceProfile())->assertNoSymlinks($this->stateRoot, 'installer-backups/' . $entry['beforeSha256'] . '.blob');
             $destination = $this->panelRoot . '/' . $relative;
@@ -115,54 +165,54 @@ final class BootstrapInstaller
             if ($actual === $entry['beforeSha256']) {
                 continue;
             }
-            if ($actual !== $entry['afterSha256'] || hash_file('sha256', $entry['backup']) !== $entry['beforeSha256']) {
+            $bytes = Files::read($entry['backup']);
+            if ($actual !== $entry['afterSha256'] || hash('sha256', $bytes) !== $entry['beforeSha256']) {
                 throw new RuntimeException('Refusing to overwrite unexpected bootstrap edits while recovering: ' . $relative);
             }
-            $prepared[$relative] = $entry;
+            $prepared[$relative] = $entry + ['bytes' => $bytes];
         }
         $restored = [];
         foreach ($prepared as $relative => $entry) {
             $destination = $this->panelRoot . '/' . $relative;
-            $this->atomicWrite($destination, (string) file_get_contents($entry['backup']), fileperms($destination) & 0777);
+            $this->atomicWrite($destination, $entry['bytes'], fileperms($destination) & 0777, $entry['afterSha256']);
             $restored[] = $relative;
         }
         return ['restored' => $restored];
     }
 
-    private function mkdir(string $path): void
+    private function lock()
     {
-        if (!is_dir($path) && !mkdir($path, 0700, true) && !is_dir($path)) {
-            throw new RuntimeException('Cannot create private installer state: ' . $path);
+        $lock = Files::lock($this->stateRoot . '/installer-backups/install.lock', false);
+        if ($lock === null) {
+            throw new RuntimeException('Another bootstrap installer or recovery is running.');
         }
+        return $lock;
     }
 
-    private function atomicWrite(string $path, string $bytes, int $mode): void
+    private function record(): ?array
     {
-        $temporary = $path . '.addon-manager-' . bin2hex(random_bytes(8));
-        $handle = fopen($temporary, 'xb');
-        if (!$handle) {
-            throw new RuntimeException('Cannot prepare file: ' . $path);
+        $path = $this->stateRoot . '/installer-backups/registration.json';
+        Files::noLinks($path);
+        if (!file_exists($path)) return null;
+        $record = Files::json($path);
+        if (($record['schemaVersion'] ?? null) !== 1 || !is_string($record['profile'] ?? null) || !is_array($record['files'] ?? null) || !in_array($record['status'] ?? null, ['prepared', 'applied'], true)) {
+            throw new RuntimeException('Unexpected bootstrap backup recovery record.');
         }
-        try {
-            $offset = 0;
-            while ($offset < strlen($bytes)) {
-                $written = fwrite($handle, substr($bytes, $offset));
-                if ($written === false || $written === 0) {
-                    throw new RuntimeException('Cannot write file: ' . $path);
-                }
-                $offset += $written;
+        foreach ($record['files'] as $relative => $entry) {
+            if (!in_array($relative, ['bootstrap/app.php', 'resources/views/layouts/admin.blade.php'], true) || !is_array($entry) || array_diff(array_keys($entry), ['backup', 'beforeSha256', 'afterSha256']) !== [] || !is_string($entry['beforeSha256'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $entry['beforeSha256']) || !is_string($entry['afterSha256'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $entry['afterSha256']) || ($entry['backup'] ?? null) !== $this->stateRoot . '/installer-backups/' . $entry['beforeSha256'] . '.blob') {
+                throw new RuntimeException('Unexpected bootstrap backup recovery record.');
             }
-            fflush($handle);
-            if (function_exists('fsync')) {
-                fsync($handle);
+            Files::noLinks($entry['backup']);
+        }
+        return $record;
+    }
+
+    private function atomicWrite(string $path, string $bytes, int $mode, ?string $expected = null): void
+    {
+        Files::atomic($path, $bytes, $mode, null, $expected === null ? null : static function () use ($path, $expected): void {
+            if (Files::hash($path) !== $expected) {
+                throw new RuntimeException('Source changed during bootstrap update: ' . $path);
             }
-            chmod($temporary, $mode);
-        } finally {
-            fclose($handle);
-        }
-        if (!rename($temporary, $path)) {
-            @unlink($temporary);
-            throw new RuntimeException('Cannot activate file: ' . $path);
-        }
+        });
     }
 }

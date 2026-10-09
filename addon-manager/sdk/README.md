@@ -5,7 +5,7 @@ It needs PHP 8.2+ and ext-zip, with no Composer or Laravel dependencies. Keep th
 SDK with the matching manager version; its bootstrap and core services are part
 of the exporter.
 
-Use a fresh manager distribution when adopting version 2.0.0. Read the
+Use a fresh manager distribution when adopting version 2.0.1. Read the
 [upgrade guide](../docs/UPGRADING.md) before replacing an existing manager;
 active legacy state is refused and is not automatically migrated.
 

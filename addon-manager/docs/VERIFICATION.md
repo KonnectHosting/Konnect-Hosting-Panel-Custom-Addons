@@ -1,4 +1,4 @@
-# Addon Manager 2.0.0 development release verification
+# Addon Manager 2.0.1 development release verification
 
 Verified on 2026-10-09 in disposable installations with PHP 8.3.35, MariaDB
 11.4, the Panel's locked Composer dependencies, and an immutable Node 22 image.
@@ -7,14 +7,33 @@ Theme 2.1.3, Addon Pack 2.0.2, and the 13 controllers delivered by Arix's instal
 
 | Check | Result |
 | --- | --- |
-| Standalone acceptance | 177/177 passed; 0 failed, 0 skipped |
-| Restricted Docker runner | 17/17 passed; 0 failed, 0 skipped |
-| Laravel: stock Panel | 10/10 passed; 0 failed, 0 skipped |
-| Laravel: Arix + Addon Pack | 10/10 passed; 0 failed, 0 skipped |
-| Browser UI with fixture responses | 35 checks passed |
+| Standalone acceptance | 257/257 passed; 0 failed, 0 skipped |
+| Restricted Docker runner | 20/20 passed; 0 failed, 0 skipped |
+| Laravel: stock Panel | 14/14 passed; 0 failed, 0 skipped |
+| Laravel: Arix + Addon Pack | 14/14 passed; 0 failed, 0 skipped |
+| Browser UI with fixture responses | 64 checks passed |
 | Supervised stock lifecycle | Install, disable, enable, update to 1.1.0, delete passed |
 | Supervised Arix/Pack lifecycle | Install, disable, enable, update to 1.1.0, delete passed |
 | Restricted offline frontend build | Stock: 23 output files; Arix/Pack: 26 output files |
+| Manager PHP syntax | 53 files passed |
+| SDK examples | All three validated and exported |
+
+The [2.0.1 audit](AUDIT.md) records the confirmed defects and regression scope.
+Both retained 2.0.0 fixture installations accepted the 2.0.1 loader without
+recapturing source or replacing their registry. Real dry-run and normal repeat
+installation checks rejected unrelated source drift and preserved the changed
+file, bootstrap, navigation and registry. Clean repeat installation passed.
+
+Browser checks include lost acknowledgements, unexpected gateway/route and
+expired-session and two-factor replies, ambiguous validation rejections,
+cross-tab stale polls, actor changes, failed registry
+refreshes, delayed dialogs and versioned assets. Kernel checks independently
+verify the required mutation actor header, browser-like two-factor errors,
+cookie/retry headers, authorization/CSRF and retained migration ownership and
+schema replay. An actual HTTP regression also forces an index-write failure
+after durable enqueue, verifies a generic server error, then repairs the index
+and retrieves the original operation without duplication. The 3 standalone CLI
+tests exercise 45 invocations before boot.
 
 The standalone suite includes unsafe archive/download policies, dependency
 composition, source drift, reviewed cascade races, additive migration contracts,

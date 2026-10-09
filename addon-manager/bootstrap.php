@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 // This loader deliberately needs neither Composer changes nor Laravel to recover files.
 if (!defined('ADDON_MANAGER_VERSION')) {
-    define('ADDON_MANAGER_VERSION', '2.0.0');
+    define('ADDON_MANAGER_VERSION', '2.0.1');
     spl_autoload_register(static function (string $class): void {
         $prefix = 'AddonManager\\';
         if (!str_starts_with($class, $prefix)) {

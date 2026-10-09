@@ -4,7 +4,7 @@ A drop-in manager for declared addon packages on an existing Pterodactyl Panel.
 It provides an admin page, a durable operation queue, package and patch
 validation, retained baseline reconstruction, and standalone file recovery.
 The manager lives in `addon-manager/`, outside the host's `addons/` folder.
-Version 2.0.0 supports measured stock Panel 1.15.1 sources; Arix Theme 2.1.3
+Version 2.0.1 supports measured stock Panel 1.15.1 sources; Arix Theme 2.1.3
 and Addon Pack 2.0.2 are optional supported fixture profiles. Other versions or
 source variants require a tested adapter matching the installed files.
 
@@ -31,10 +31,12 @@ php addon-manager/bin/manager.php --panel-root=/var/www/pterodactyl doctor
 
 Use a fresh `addon-manager/` distribution. Read [the upgrade guide](docs/UPGRADING.md)
 before replacing an earlier manager: active legacy registration or state is
-refused, and version 2.0.0 does not automatically migrate it.
+refused, and version 2.0.1 does not automatically migrate it.
 
 See the [verification record and remaining limits](docs/VERIFICATION.md) for the
 real Panel/Arix tests, supervised lifecycle checks, and download test coverage.
+
+Version 2.0.1 includes the [bug audit and regression fixes](docs/AUDIT.md).
 
 The manager admin page is `/admin/addon-manager`. An authenticated root admin
 submits an addon URL; a **dedicated manager worker** performs the operation and

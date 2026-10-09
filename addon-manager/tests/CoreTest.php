@@ -64,6 +64,53 @@ $suite->test('core', 'hard-linked payload bytes reject even when their digest ma
     });
 });
 
+$suite->test('core', 'JSON objects with numeric keys cannot stand in for primitive lists', function (): void {
+    temporary(function (string $root): void {
+        $definition = manifest();
+        $definition['build'] = ['mode' => 'panel', 'profile' => 'panel-v1', 'outputs' => ['public/assets']];
+        $path = package($root . '/package', $definition);
+        PackageValidator::validate($path);
+        $definition['build']['outputs'] = (object) ['0' => 'public/assets'];
+        write($path . '/manifest.json', manifestJson($definition));
+        rejects(static fn () => PackageValidator::validate($path), '/outputs.*array/i');
+
+        foreach (['primary', 'columns'] as $field) {
+            $operation = $field === 'primary'
+                ? ['type' => 'createTable', 'table' => 'test_example_records', 'columns' => [['name' => 'id', 'type' => 'integer']], 'primary' => ['id']]
+                : ['type' => 'createIndex', 'table' => 'test_example_records', 'name' => 'records_id', 'columns' => ['id']];
+            $document = ['operations' => [$operation]];
+            ManifestValidator::validateMigration(\AddonManager\Core\JsonDocument::decode(json_encode($document, JSON_THROW_ON_ERROR)), 'test.example');
+            $document['operations'][0][$field] = (object) ['0' => 'id'];
+            rejects(static fn () => \AddonManager\Core\JsonDocument::decode(json_encode($document, JSON_THROW_ON_ERROR)), '/array/i');
+        }
+    });
+});
+
+foreach (['.user.ini', 'public/.htaccess', 'public/assets/.HTACCESS', 'public/.user.ini', 'resources/views/.user.ini'] as $target) {
+    $suite->test('core', 'web server and PHP directory configuration is protected: ' . $target, function () use ($target): void {
+        $definition = manifest();
+        $definition['files'][] = fileDeclaration('payload.txt', $target, 'SetHandler application/x-httpd-php');
+        rejects(static fn () => ManifestValidator::validate($definition), '/protected/i');
+        $definition['files'] = [];
+        $definition['patches'][] = \AddonManager\Tests\patchDeclaration('web-config', $target, 'panel', 'find.txt', 'replace.txt', 'old', 'new');
+        rejects(static fn () => ManifestValidator::validate($definition), '/protected/i');
+    });
+}
+
+foreach (['.docker/config.json', '.gnupg/data', '.kube/config', '.azure/config', '.netrc', '_netrc', 'secrets/private.pem', 'secrets/private.KEY', 'secrets/certificate.p12', 'secrets/certificate.pfx'] as $path) {
+    $suite->test('core', 'credential paths reject as targets and package sources: ' . $path, function () use ($path): void {
+        $definition = manifest();
+        $definition['files'][] = fileDeclaration('payload.txt', $path, 'credential fixture');
+        rejects(static fn () => ManifestValidator::validate($definition), '/protected/i');
+        temporary(function (string $root) use ($path): void {
+            $definition = manifest();
+            $definition['files'][] = fileDeclaration($path, 'resources/views/test.blade.php', 'credential fixture');
+            $package = package($root . '/package', $definition, [$path => 'credential fixture']);
+            rejects(static fn () => PackageValidator::validate($package), '/protected/i');
+        });
+    });
+}
+
 foreach (['.env', 'vendor/test.php', 'node_modules/test.js', 'storage/logs/test.log', 'addon-manager/bootstrap.php', 'bootstrap/app.php', 'resources/views/layouts/admin.blade.php', 'config/app.php', 'webpack.config.js', 'composer.json', 'package.json', 'yarn.lock', 'app/Http/Middleware/Admin/Arix/ArixHandler.php', 'app/Http/Controllers/Admin/Arix/ArixDashboardController.php', 'app/Http/Controllers/Auth/ArixController.php', 'app/Helpers/ArixAddons.php', 'config/arix.php', 'config/arixTheme.php', 'config/pluginsAddon.php', 'routes/admin.php', 'routes/auth.php', 'APP/HTTP/Middleware/Admin/ARIX/ArixHandler.php', 'app/Http/Middleware/AdminAuthenticate.php', 'app/Http/Middleware/RequireTwoFactorAuthentication.php', 'app/Http/Middleware/VerifyCsrfToken.php', 'APP/HTTP/MIDDLEWARE/VERIFYCSRFTOKEN.PHP', 'public/test.php', '../outside.txt', '/tmp/outside.txt', 'C:\\outside.txt', 'resources\\views\\test.blade.php'] as $target) {
     $suite->test('core', 'protected or ambiguous target rejects: ' . $target, function () use ($target): void {
         $definition = manifest();
@@ -283,8 +330,8 @@ foreach (['http://github.com/example/addons/releases/download/v1.0.0/addon.zip',
     });
 }
 
-foreach (['127.0.0.1', '10.0.0.1', '169.254.169.254', '192.168.0.1', '::1', 'fe80::1', '::ffff:127.0.0.1'] as $address) {
-    $suite->test('download', 'private destination address blocks transport: ' . $address, function () use ($releaseUrl, $address): void {
+foreach (['127.0.0.1', '10.0.0.1', '169.254.169.254', '192.168.0.1', '::1', 'fe80::1', '::ffff:127.0.0.1', '3fff::1', '3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff'] as $address) {
+    $suite->test('download', 'non-public destination address blocks transport: ' . $address, function () use ($releaseUrl, $address): void {
         temporary(function (string $root) use ($releaseUrl, $address): void {
             $calls = 0;
             $transport = static function (array $request) use (&$calls): array { $calls++; return ['status' => 200, 'headers' => [], 'body' => 'bad']; };
@@ -355,3 +402,47 @@ $suite->test('download', 'GitHub folder ref resolves once and uses an immutable 
         same(1, count(array_filter($requests, static fn (string $url): bool => str_ends_with($url, '/commits/main'))));
     });
 });
+
+foreach (['heads', 'tags'] as $namespace) {
+    $suite->test('download', 'explicit archive ' . $namespace . ' reference preserves its namespace', function () use ($namespace): void {
+        temporary(function (string $root) use ($namespace): void {
+            $qualified = 'refs/' . $namespace . '/release';
+            $commit = str_repeat($namespace === 'heads' ? 'b' : 'a', 40);
+            $transport = static function (array $request) use ($qualified, $commit): array {
+                if ($request['host'] === 'api.github.com') {
+                    same('https://api.github.com/repos/example/addons/commits/' . rawurlencode($qualified), $request['url'], 'Archive ref lost its branch/tag identity');
+                    return ['status' => 200, 'headers' => [], 'body' => json_encode(['sha' => $commit], JSON_THROW_ON_ERROR)];
+                }
+                same('https://codeload.github.com/example/addons/zip/' . $commit, $request['url']);
+                return ['status' => 200, 'headers' => [], 'body' => 'frozen archive bytes'];
+            };
+            $result = (new GitHubDownloader($transport, static fn (): array => ['93.184.216.34']))->download('https://github.com/example/addons/archive/' . $qualified . '.zip', $root . '/download');
+            same($qualified, $result['source']['ref']);
+            same($commit, $result['source']['commit']);
+        });
+    });
+}
+
+foreach (['feature/main', 'feature%2Fmain'] as $urlRef) {
+    $suite->test('download', 'slash-containing branch resolves with a portable dot-containing folder: ' . $urlRef, function () use ($urlRef): void {
+        temporary(function (string $root) use ($urlRef): void {
+            $commit = str_repeat('c', 40);
+            $requests = [];
+            $transport = static function (array $request) use (&$requests, $commit): array {
+                $requests[] = $request['url'];
+                if ($request['host'] === 'api.github.com') {
+                    return str_ends_with($request['url'], '/commits/feature%2Fmain')
+                        ? ['status' => 200, 'headers' => [], 'body' => json_encode(['sha' => $commit], JSON_THROW_ON_ERROR)]
+                        : ['status' => 404, 'headers' => [], 'body' => '{}'];
+                }
+                same('https://codeload.github.com/example/addons/zip/' . $commit, $request['url']);
+                return ['status' => 200, 'headers' => [], 'body' => 'frozen archive bytes'];
+            };
+            $result = (new GitHubDownloader($transport, static fn (): array => ['93.184.216.34']))->download('https://github.com/example/addons/tree/' . $urlRef . '/addons/foo..bar', $root . '/download');
+            same('feature/main', $result['source']['ref']);
+            same($commit, $result['source']['commit']);
+            same('addons/foo..bar', $result['folder']);
+            check(in_array('https://api.github.com/repos/example/addons/commits/feature%2Fmain', $requests, true), 'Slash-containing branch was never resolved');
+        });
+    });
+}

@@ -23,10 +23,15 @@ final class JsonDocument
         }
         if (isset($object->extensions)) { foreach ($object->extensions as $key => $entries) { self::objects($entries, 'extensions.' . $key); } }
         if (isset($object->database->migrations)) { self::objects($object->database->migrations, 'database.migrations'); }
+        if (isset($object->build) && property_exists($object->build, 'outputs')) { self::array($object->build->outputs, 'build.outputs'); }
         if (property_exists($object, 'operations')) {
             self::objects($object->operations, 'operations');
             foreach ($object->operations as $operation) {
-                if (property_exists($operation, 'columns') && ($operation->type ?? '') !== 'createIndex') { self::objects($operation->columns, 'columns'); }
+                if (property_exists($operation, 'columns')) {
+                    if (($operation->type ?? '') === 'createIndex') { self::array($operation->columns, 'columns'); }
+                    else { self::objects($operation->columns, 'columns'); }
+                }
+                if (property_exists($operation, 'primary')) { self::array($operation->primary, 'primary'); }
             }
         }
         return json_decode($bytes, true, 64, JSON_THROW_ON_ERROR);
@@ -34,8 +39,13 @@ final class JsonDocument
 
     private static function objects(mixed $values, string $name): void
     {
-        if (!is_array($values)) { throw new RuntimeException($name . ' must be a JSON array.'); }
+        self::array($values, $name);
         foreach ($values as $value) { if (!$value instanceof stdClass) { throw new RuntimeException($name . ' entries must be JSON objects.'); } }
+    }
+
+    private static function array(mixed $values, string $name): void
+    {
+        if (!is_array($values)) { throw new RuntimeException($name . ' must be a JSON array.'); }
     }
 
     // Syntax has already passed native parsing. This pass retains every key occurrence.

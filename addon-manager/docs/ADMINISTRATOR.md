@@ -36,7 +36,7 @@ queue workers and scheduled work. Preserve the Panel's existing nginx layout.
 Use PHP 8.2+ with its Panel-required extensions and ext-zip; native frontend
 changes also require the matched host toolchain and retained dependencies.
 
-A version 2.0.0 release ZIP contains just the `addon-manager/` folder. Use a
+A version 2.0.1 release ZIP contains just the `addon-manager/` folder. Use a
 fresh distribution rather than overlaying an earlier manager's files. Before
 replacing a previous installation, follow [the upgrade guide](UPGRADING.md):
 active legacy registration or state is refused, and no automatic migration is
@@ -49,9 +49,9 @@ Panel root. For example, with the release files already in `/tmp/`:
 
 ```sh
 cd /tmp
-sha256sum -c addon-manager-2.0.0.zip.sha256
-unzip -l addon-manager-2.0.0.zip
-unzip addon-manager-2.0.0.zip -d /var/www/pterodactyl
+sha256sum -c addon-manager-2.0.1.zip.sha256
+unzip -l addon-manager-2.0.1.zip
+unzip addon-manager-2.0.1.zip -d /var/www/pterodactyl
 cd /var/www/pterodactyl
 php addon-manager/install.php --panel-root=/var/www/pterodactyl
 php addon-manager/bin/manager.php --panel-root=/var/www/pterodactyl doctor
@@ -86,6 +86,15 @@ The manager page is `/admin/addon-manager`, protected by the existing admin
 session, two-factor requirement, root-admin check and CSRF protection. This
 prebuilt page does not require rebuilding Panel's frontend. Keep the direct URL
 available when diagnosing a theme navigation change.
+
+After a manager update, reload the admin page to fetch versioned assets. The
+client binds mutation requests to the administrator who opened the page. If the
+account or session changes, reload and sign in to the original account to resume
+a pending request. Complete any required two-factor setup before reconnecting.
+An uncertain submission remains recorded even if a later retry fails validation;
+resolve the reported issue and reconnect with the same request ID. A fresh,
+definitively rejected validation request can be corrected normally. Do not clear
+an uncertain request and submit a new one.
 
 ## Configure validation and the worker
 

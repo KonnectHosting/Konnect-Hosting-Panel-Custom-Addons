@@ -173,7 +173,7 @@ try {
         try {
             rejects(static fn () => $runner->verifyStage($outside, [], ['id' => 'outside']), '/outside|allowed root/i');
             symlink($outside, $root . '/escaping-stage');
-            rejects(static fn () => $runner->verifyStage($root . '/escaping-stage', [], ['id' => 'escaping']), '/outside|allowed root/i');
+            rejects(static fn () => $runner->verifyStage($root . '/escaping-stage', [], ['id' => 'escaping']), '/outside|allowed root|symbolic|symlink/i');
             $internal = $root . '/internal-link';
             mkdir($internal, 0700);
             symlink($outside, $internal . '/payload-link');
@@ -194,7 +194,40 @@ try {
         symlink($panel . '/vendor', $fakePanel . '/vendor');
         $stage = $root . '/vendor-escape';
         mkdir($stage, 0700);
-        rejects(static fn () => (new IsolatedRunner($fakePanel, $state, $config))->verifyStage($stage, [], ['id' => 'vendor-escape']), '/outside|allowed root|missing/i');
+        rejects(static fn () => (new IsolatedRunner($fakePanel, $state, $config))->verifyStage($stage, [], ['id' => 'vendor-escape']), '/outside|allowed root|missing|symbolic|symlink/i');
+    });
+
+    $runnerTest('nested credential stores and authenticated package configuration never enter a container', function () use ($root, $runner): void {
+        $cases = [
+            'nested/.ssh/id_rsa' => 'synthetic private key',
+            'nested/.AWS/credentials' => 'synthetic cloud credential',
+            'nested/.docker/config.json' => '{"auths":{"registry.invalid":{"auth":"synthetic"}}}',
+            'nested/.netrc' => 'machine registry.invalid login fixture password synthetic',
+            'nested/.npmrc' => '//registry.invalid/:_authToken=synthetic',
+            'nested/.yarnrc.yml' => 'npmAuthToken: synthetic',
+        ];
+        foreach ($cases as $relative => $bytes) {
+            $stage = $root . '/credentials-' . bin2hex(random_bytes(4));
+            write($stage . '/' . $relative, $bytes);
+            $before = Files::inventory($stage);
+            rejects(static fn () => $runner->verifyStage($stage, [], ['id' => 'credential-boundary']), '/credentials|private-key/i');
+            same($before, Files::inventory($stage), 'Credential rejection changed the staged files');
+        }
+        $stage = $root . '/ordinary-package-configuration';
+        write($stage . '/.npmrc', 'registry=https://registry.npmjs.org/');
+        same($stage, (new ReflectionMethod(IsolatedRunner::class, 'stage'))->invoke($runner, $stage), 'Ordinary build configuration was rejected');
+    });
+
+    $runnerTest('Docker mount CSV delimiters reject before starting a container', function () use ($root, $runner): void {
+        $mount = new ReflectionMethod(IsolatedRunner::class, 'mount');
+        foreach ([',dst=', '"quoted"', "line\nbreak"] as $name) {
+            $path = $root . '/mount-' . $name;
+            mkdir($path, 0700);
+            rejects(static fn () => $mount->invoke($runner, $path, '/work'), '/CSV delimiters|control characters/i');
+        }
+        $safe = $root . '/ordinary workspace';
+        mkdir($safe, 0700);
+        same('type=bind,src=' . $safe . ',dst=/work,readonly', $mount->invoke($runner, $safe, '/work'));
     });
 
     $runnerTest('real candidate boots Laravel and validates SDK page and jobs within isolation boundaries', function () use ($panel, $registry, $root, $runner): void {
@@ -313,6 +346,17 @@ PHP;
         $definition['extensions'] = ['jobs' => [['id' => 'premature-job', 'handler' => 'Pterodactyl\\Addons\\RunnerFixture\\Premature@run', 'permission' => 'system']]];
         write($stage . '/app/Addons/RunnerFixture/Premature.php', $bytes);
         rejects(static fn () => $runner->verifyStage($stage, [ManifestValidator::validate($definition)], ['id' => 'premature-exit']), '/ended before completing validation/i');
+    });
+
+    $runnerTest('staged PHP cannot disable completion guard through global variables and spoof a full result', function () use ($registry, $root, $runner): void {
+        $stage = runnerStage($registry, $root, 'global-completion-spoof');
+        $fake = json_encode(['passed' => true, 'phpFiles' => 1, 'baselinePhpFiles' => 1000, 'laravelBoot' => true, 'handlerClasses' => 1, 'routes' => 0, 'pages' => 0, 'events' => 0, 'schedules' => 0], JSON_THROW_ON_ERROR);
+        $bytes = '<?php namespace Pterodactyl\\Addons\\RunnerFixture; global $complete; $complete = true; echo ' . var_export($fake . "\n", true) . '; exit(0); final class Spoof { public function run(): void {} }';
+        $definition = runnerManifest('test.runner-spoof');
+        $definition['files'][] = fileDeclaration('payload/Spoof.php', 'app/Addons/RunnerFixture/Spoof.php', $bytes);
+        $definition['extensions'] = ['jobs' => [['id' => 'spoof-job', 'handler' => 'Pterodactyl\\Addons\\RunnerFixture\\Spoof@run', 'permission' => 'system']]];
+        write($stage . '/app/Addons/RunnerFixture/Spoof.php', $bytes);
+        rejects(static fn () => $runner->verifyStage($stage, [ManifestValidator::validate($definition)], ['id' => 'global-completion-spoof']), '/ended before completing validation/i');
     });
 
     $runnerTest('actual container rejects a registered page whose declared view is missing', function () use ($registry, $root, $runner): void {

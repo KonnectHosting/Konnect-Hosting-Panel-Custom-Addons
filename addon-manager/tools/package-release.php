@@ -4,7 +4,9 @@
 declare(strict_types=1);
 
 require __DIR__ . '/ZipBuilder.php';
+require dirname(__DIR__) . '/bootstrap.php';
 
+use AddonManager\Storage\Files;
 use AddonManager\Tools\ZipBuilder;
 
 date_default_timezone_set('UTC');
@@ -53,7 +55,7 @@ try {
                 $relative = substr($file->getPathname(), strlen($root) + 1);
                 $parts = explode('/', str_replace(DIRECTORY_SEPARATOR, '/', $relative));
                 if (array_intersect($parts, $excludedDirectories)
-                    || array_filter($parts, static fn (string $part): bool => str_starts_with($part, '.'))) {
+                    || array_filter($parts, static fn (string $part): bool => str_starts_with($part, '.') || Files::sensitive($part))) {
                     return false;
                 }
                 if ($file->isLink()) {

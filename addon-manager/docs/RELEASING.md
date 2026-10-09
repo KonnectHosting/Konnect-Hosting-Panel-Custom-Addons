@@ -4,14 +4,14 @@ From a clean, reviewed checkout with all manager files present:
 
 ```sh
 mkdir -p /tmp/addon-manager-release
-php addon-manager/tools/package-release.php --output=/tmp/addon-manager-release/addon-manager-2.0.0.zip
+php addon-manager/tools/package-release.php --output=/tmp/addon-manager-release/addon-manager-2.0.1.zip
 cd /tmp/addon-manager-release
-sha256sum -c addon-manager-2.0.0.zip.sha256
-unzip -l addon-manager-2.0.0.zip
+sha256sum -c addon-manager-2.0.1.zip.sha256
+unzip -l addon-manager-2.0.1.zip
 ```
 
 For a repository-local artifact, use a root-level `dist/` directory with
-`--output=dist/addon-manager-2.0.0.zip`. The output must stay outside
+`--output=dist/addon-manager-2.0.1.zip`. The output must stay outside
 `addon-manager/`, so the archive cannot include itself.
 
 The packaging script includes only `addon-manager/` with its bootstrap,
@@ -35,7 +35,7 @@ plain statement of remaining gaps. Do not claim an arbitrary upgraded server is
 supported solely because the repository fixtures passed.
 
 Ship a fresh distribution and include [the upgrade guide](UPGRADING.md) with
-the release. Version 2.0.0 refuses active legacy registration or state; it does
+the release. Version 2.0.1 refuses active legacy registration or state; it does
 not automatically migrate a previous installation. Operators must follow the
 documented replacement and recovery procedure before installing it.
 

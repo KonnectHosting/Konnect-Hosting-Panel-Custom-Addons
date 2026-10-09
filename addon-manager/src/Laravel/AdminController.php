@@ -7,6 +7,7 @@ namespace AddonManager\Laravel;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Validation\ValidationException;
+use AddonManager\Lifecycle\EnqueueRejectedException;
 use AddonManager\Lifecycle\Manager;
 use RuntimeException;
 
@@ -28,6 +29,10 @@ final class AdminController extends Controller
 
     public function enqueue(Request $request): mixed
     {
+        $actor = (string) $request->user()->getAuthIdentifier();
+        if ($request->header('X-Addon-Manager-Actor') !== $actor) {
+            abort(403, 'Your administrator session changed. Refresh the manager page before retrying.');
+        }
         $unknown = array_diff(array_keys($request->all()), ['action', 'url', 'addonId', 'cascade', 'expectedAffectedIds', 'requestId']);
         if ($unknown !== []) {
             throw ValidationException::withMessages(['request' => ['Unknown fields: ' . implode(', ', $unknown)]]);
@@ -53,8 +58,8 @@ final class AdminController extends Controller
         }
         $arguments = array_intersect_key($validated, array_flip(['url', 'addonId', 'cascade', 'expectedAffectedIds']));
         try {
-            $operation = $this->manager->enqueue($action, $arguments, 'admin:' . $request->user()->getAuthIdentifier(), $validated['requestId']);
-        } catch (RuntimeException $e) {
+            $operation = $this->manager->enqueue($action, $arguments, 'admin:' . $actor, $validated['requestId']);
+        } catch (EnqueueRejectedException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
         return response()->json(['data' => $operation], 202);

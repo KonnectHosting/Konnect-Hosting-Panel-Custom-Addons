@@ -56,7 +56,9 @@ final class GitHubDownloader
                 // GitHub branch names can contain slashes. Prefer the longest existing ref.
                 $resolved = null;
                 for ($length = count($tail); $length >= 1; $length--) {
-                    $ref = implode('/', array_map('rawurldecode', array_slice($tail, 0, $length))); $this->ref($ref);
+                    $ref = implode('/', array_map('rawurldecode', array_slice($tail, 0, $length)));
+                    // A safe folder segment (e.g. foo..bar) need not be a valid Git ref.
+                    try { $this->ref($ref); } catch (RuntimeException) { continue; }
                     $response = $this->metadata($apiBase . '/commits/' . rawurlencode($ref), true);
                     if ($response !== null) { $resolved = $response; $remaining = array_slice($tail, $length); $folder = $remaining === [] ? null : implode('/', array_map('rawurldecode', $remaining)); break; }
                 }
@@ -66,7 +68,7 @@ final class GitHubDownloader
                 $ref = strtolower($segments[3]); $resolved = $this->metadata($apiBase . '/commits/' . $ref);
             } elseif ($segments[2] === 'archive' && str_ends_with(end($segments), '.zip')) {
                 $refParts = array_slice($segments, 3);
-                if (count($refParts) >= 3 && $refParts[0] === 'refs' && in_array($refParts[1], ['heads','tags'], true)) { $refParts = array_slice($refParts, 2); }
+                // Keep explicit heads/tags namespaces: a branch and tag can share a name.
                 $ref = rawurldecode(substr(implode('/', $refParts), 0, -4)); $this->ref($ref);
                 $resolved = $this->metadata($apiBase . '/commits/' . rawurlencode($ref));
             } else { throw new RuntimeException('Unsupported GitHub link; use a release ZIP, tree folder, archive, or full commit URL.'); }
@@ -120,7 +122,7 @@ final class GitHubDownloader
             $addresses = $this->resolve($host);
             $remaining = (int) ceil($this->deadline - microtime(true));
             if ($remaining < 1) { throw new RuntimeException('GitHub download exceeded the total time limit.'); }
-            $request = ['url'=>$url,'host'=>$host,'addresses'=>$addresses,'headers'=>['Accept'=>'application/vnd.github+json','User-Agent'=>'Addon-Manager/' . (defined('ADDON_MANAGER_VERSION') ? ADDON_MANAGER_VERSION : '2.0.0'),'X-GitHub-Api-Version'=>'2022-11-28'],'maxBytes'=>$maxBytes,'timeout'=>min($remaining, $this->limits['timeout'])];
+            $request = ['url'=>$url,'host'=>$host,'addresses'=>$addresses,'headers'=>['Accept'=>'application/vnd.github+json','User-Agent'=>'Addon-Manager/' . (defined('ADDON_MANAGER_VERSION') ? ADDON_MANAGER_VERSION : '2.0.1'),'X-GitHub-Api-Version'=>'2022-11-28'],'maxBytes'=>$maxBytes,'timeout'=>min($remaining, $this->limits['timeout'])];
             $response = $this->transport !== null ? ($this->transport)($request) : $this->curl($request);
             if (!is_array($response) || !is_int($response['status'] ?? null) || !is_array($response['headers'] ?? [])) { throw new RuntimeException('Invalid HTTP transport response.'); }
             $response['url'] = $url; $headers = [];
@@ -170,7 +172,7 @@ final class GitHubDownloader
             return true;
         }
         if (!self::cidr($packed, '2000::/3')) { return false; }
-        foreach (['2001::/32','2001:2::/48','2001:db8::/32','2001:10::/28','2001:20::/28','2002::/16'] as $range) { if (self::cidr($packed, $range)) { return false; } }
+        foreach (['2001::/32','2001:2::/48','2001:db8::/32','2001:10::/28','2001:20::/28','2002::/16','3fff::/20'] as $range) { if (self::cidr($packed, $range)) { return false; } }
         return true;
     }
 

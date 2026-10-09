@@ -86,6 +86,196 @@ foreach (['public/addon-manager', 'storage/app/public/addon-manager', 'storage/a
     });
 }
 
+foreach (['unexpected file', 'changed source', 'partial matching source'] as $case) {
+    $suite->test('lifecycle', 'initial baseline retry preserves ' . $case . ' and commits only an exact snapshot', function () use ($case): void {
+        temporary(function (string $root) use ($case): void {
+            $panel = $root . '/panel';
+            $target = 'resources/views/base.blade.php';
+            $bytes = 'original host source';
+            write($panel . '/' . $target, $bytes);
+            write($panel . '/resources/views/second.blade.php', 'second host source');
+            $manager = new Manager($panel, $root . '/state');
+            $inventory = Files::inventory($panel);
+            $host = \AddonManager\Tests\host();
+            $baselineId = hash('sha256', json_encode(['host' => $host, 'inventory' => $inventory], JSON_THROW_ON_ERROR));
+            $snapshot = $root . '/state/baselines/' . $baselineId . '/files';
+            $savedPath = $case === 'unexpected file' ? 'resources/views/unexpected.blade.php' : $target;
+            $savedBytes = $case === 'partial matching source' ? $bytes : 'retained unexpected private bytes';
+            write($snapshot . '/' . $savedPath, $savedBytes);
+            if ($case === 'partial matching source') {
+                $registry = $manager->initialize($host);
+                same($inventory, Files::inventory($registry['baselineRoot']));
+                same(true, $manager->doctor()['ok']);
+            } else {
+                rejects(static fn () => $manager->initialize($host), '/interrupted baseline|unexpected/i');
+                check(!file_exists($root . '/state/registry.json'), 'Unexpected baseline was committed');
+            }
+            same($savedBytes, file_get_contents($snapshot . '/' . $savedPath), 'Initialization rewrote unexpected retained bytes');
+            same($bytes, file_get_contents($panel . '/' . $target));
+        });
+    });
+}
+
+$suite->test('lifecycle', 'unexpected protected baseline files block reconstruction without changing live source', function (): void {
+    temporary(function (string $root): void {
+        $fixture = fixture($root);
+        $before = $fixture['manager']->registry();
+        write($before['baselineRoot'] . '/unexpected-source.txt', 'retained for review');
+        $failed = operation($fixture, 'install', ['packageRoot' => package($root . '/package', manifest('test.unexpected-baseline'))], 'failed');
+        check(str_contains($failed['error'], 'Protected baseline'), 'Unexpected baseline was rejected for a different reason');
+        same($before, $fixture['manager']->registry());
+        same('retained for review', file_get_contents($before['baselineRoot'] . '/unexpected-source.txt'));
+        same("baseline header\nsummary=BASE\nfooter=BASE\n", file_get_contents($fixture['panel'] . '/resources/views/base.blade.php'));
+    });
+});
+
+$suite->test('lifecycle', 'baseline capture filters credential stores and authenticated package config while preserving ordinary build config', function (): void {
+    temporary(function (string $root): void {
+        $panel = $root . '/panel';
+        $sensitive = [
+            '.NETRC' => 'machine registry.example login user password fixture-secret',
+            '.docker/config.json' => '{"auths":{"registry.example":{"auth":"fixture-secret"}}}',
+            '.gnupg/private-keys-v1.d/key.data' => 'fixture-secret',
+            'nested/.ENV.LOCAL' => 'TOKEN=fixture-secret',
+            '.npmrc' => '//registry.example/:_authToken=fixture-secret',
+            'nested/.yarnrc' => 'registry "https://user:fixture-secret@registry.example"',
+            'nested/.yarnrc.yml' => 'npmAuthToken: fixture-secret',
+        ];
+        $ordinary = ['resources/views/base.blade.php' => 'host view', '.yarnrc.yml' => "nodeLinker: node-modules\n", 'config/.npmrc' => "registry=https://registry.npmjs.org/\n"];
+        foreach ($sensitive + $ordinary as $relative => $bytes) write($panel . '/' . $relative, $bytes);
+        $manager = new Manager($panel, $root . '/state');
+        $registry = $manager->initialize(\AddonManager\Tests\host());
+        foreach ($sensitive as $relative => $bytes) {
+            check(!isset($registry['baselineInventory'][$relative]), 'Captured credentials from ' . $relative);
+            check(!file_exists($registry['baselineRoot'] . '/' . $relative), 'Copied credentials into the protected baseline');
+            same($bytes, file_get_contents($panel . '/' . $relative), 'Credential filtering changed a user file');
+        }
+        foreach ($ordinary as $relative => $bytes) same(hash('sha256', $bytes), $registry['baselineInventory'][$relative] ?? null, 'Ordinary host build configuration was excluded');
+        $fixture = ['manager' => $manager, 'panel' => $panel, 'state' => $root . '/state'];
+        operation($fixture, 'install', ['packageRoot' => package($root . '/package', manifest('test.credential-filter'))]);
+        foreach ($sensitive as $relative => $bytes) same($bytes, file_get_contents($panel . '/' . $relative));
+        same(true, $manager->doctor()['ok']);
+    });
+});
+
+$suite->test('lifecycle', 'a retained credential baseline fails closed without rewriting its trusted ledger', function (): void {
+    temporary(function (string $root): void {
+        $fixture = fixture($root);
+        $registry = $fixture['manager']->registry();
+        $bytes = '//registry.example/:_authToken=retained-fixture-secret';
+        write($fixture['panel'] . '/.npmrc', $bytes);
+        write($registry['baselineRoot'] . '/.npmrc', $bytes);
+        foreach (['baselineInventory', 'activeInventory'] as $key) {
+            $registry[$key]['.npmrc'] = hash('sha256', $bytes);
+            ksort($registry[$key], SORT_STRING);
+        }
+        Files::writeJson($fixture['state'] . '/registry.json', $registry);
+        $before = file_get_contents($fixture['state'] . '/registry.json');
+        rejects(static fn () => $fixture['manager']->initialize(\AddonManager\Tests\host()), '/drift|rebase/i');
+        operation($fixture, 'install', ['packageRoot' => package($root . '/package', manifest('test.retained-credential'))], 'failed');
+        same($before, file_get_contents($fixture['state'] . '/registry.json'), 'Credential baseline migration was silently applied');
+        same($bytes, file_get_contents($fixture['panel'] . '/.npmrc'));
+        same($bytes, file_get_contents($registry['baselineRoot'] . '/.npmrc'));
+        same(false, $fixture['manager']->doctor()['ok']);
+    });
+});
+
+$suite->test('lifecycle', 'directory durability failures are reported instead of discarded', function (): void {
+    temporary(function (string $root): void {
+        write($root . '/regular-file', 'not a directory');
+        rejects(static fn () => Files::syncDirectory($root . '/regular-file'), '/durabl.*sync directory/i');
+        if (is_dir('/proc')) rejects(static fn () => Files::syncDirectory('/proc'), '/durabl.*sync directory/i');
+        Files::syncDirectory($root);
+    });
+});
+
+$suite->test('lifecycle', 'storage reads reject special files and default state cannot conceal symbolic links', function (): void {
+    temporary(function (string $root): void {
+        rejects(static fn () => Files::read($root), '/regular file/i');
+        if (function_exists('posix_mkfifo')) {
+            check(posix_mkfifo($root . '/pipe', 0600), 'Could not create special-file fixture');
+            rejects(static fn () => Files::read($root . '/pipe'), '/regular file/i');
+            unlink($root . '/pipe');
+        }
+        symlink($root . '/missing', $root . '/linked-state.json');
+        rejects(static fn () => Files::json($root . '/linked-state.json', ['next' => 1]), '/symbolic link/i');
+        same(['next' => 1], Files::json($root . '/missing-state.json', ['next' => 1]));
+    });
+});
+
+function lifecycleRegistrationRepairFixture(string $root, array $targets = ['bootstrap/app.php', 'resources/views/layouts/admin.blade.php']): array
+{
+    $profile = json_decode(file_get_contents(dirname(__DIR__) . '/adapters/panel-1.15.1.json'), true, 512, JSON_THROW_ON_ERROR)['profiles'][0];
+    $panel = $root . '/panel';
+    foreach ($profile['fixtureSources'] as $relative => $source) write($panel . '/' . $relative, file_get_contents(dirname(__DIR__, 2) . '/' . $source));
+    write($panel . '/resources/views/unrelated-source.blade.php', 'unchanged unrelated host source');
+    $bootstrap = new \AddonManager\Installer\BootstrapInstaller($panel, dirname(__DIR__), $root . '/state');
+    $registration = $bootstrap->apply();
+    $manager = new Manager($panel, $root . '/state');
+    $registry = $manager->initialize($registration['profile']['host']);
+    foreach ($targets as $relative) {
+        $block = $relative === 'bootstrap/app.php' ? \AddonManager\Installer\SourceProfile::BOOTSTRAP_BLOCK : \AddonManager\Installer\SourceProfile::NAV_BLOCK;
+        $bytes = file_get_contents($panel . '/' . $relative);
+        check(substr_count($bytes, $block) === 1, 'Registration fixture does not contain one exact block');
+        write($panel . '/' . $relative, str_replace($block, '', $bytes));
+    }
+    $repairs = array_map(static fn (array $change): array => array_intersect_key($change, array_flip(['beforeSha256', 'afterSha256'])), $bootstrap->plan()['changes']);
+    return ['manager' => $manager, 'bootstrap' => $bootstrap, 'registry' => $registry, 'panel' => $panel, 'state' => $root . '/state', 'repairs' => $repairs];
+}
+
+foreach ([['bootstrap/app.php'], ['resources/views/layouts/admin.blade.php'], ['bootstrap/app.php', 'resources/views/layouts/admin.blade.php']] as $targets) {
+    $suite->test('lifecycle', 'prospective registration doctor accepts only the exact planned repair for ' . implode(', ', $targets), function () use ($targets): void {
+        temporary(function (string $root) use ($targets): void {
+            $fixture = lifecycleRegistrationRepairFixture($root, $targets);
+            $live = Files::inventory($fixture['panel']);
+            $state = Files::inventory($fixture['state']);
+            same(false, $fixture['manager']->doctor()['ok'], 'Actual missing registration was reported healthy');
+            $prospective = $fixture['manager']->doctor($fixture['repairs']);
+            same(true, $prospective['ok'], 'Exact registration repair failed prospective checks');
+            $drift = array_values(array_filter($prospective['checks'], static fn (array $check): bool => $check['name'] === 'source-drift'))[0];
+            check(str_contains($drift['message'], 'Prospective planned registration'), 'Prospective check was reported as actual source readiness');
+            same($live, Files::inventory($fixture['panel']), 'Prospective check changed live source');
+            same($state, Files::inventory($fixture['state']), 'Prospective check changed retained state');
+            same($fixture['registry'], $fixture['manager']->registry());
+            $fixture['bootstrap']->apply();
+            same(true, $fixture['manager']->doctor()['ok'], 'Actual registration repair did not restore normal drift verification');
+            same($fixture['registry'], $fixture['manager']->registry(), 'Registration repair rewrote the trusted ledger');
+        });
+    });
+}
+
+foreach (['unrelated drift', 'unrelated override', 'changed marker', 'wrong before hash', 'wrong after hash', 'unknown field', 'missing field', 'malformed hash'] as $case) {
+    $suite->test('lifecycle', 'prospective registration doctor refuses ' . $case . ' and preserves source and state', function () use ($case): void {
+        temporary(function (string $root) use ($case): void {
+            $fixture = lifecycleRegistrationRepairFixture($root);
+            $repairs = $fixture['repairs'];
+            $target = 'bootstrap/app.php';
+            if ($case === 'unrelated drift' || $case === 'unrelated override') {
+                $unrelated = 'resources/views/unrelated-source.blade.php';
+                write($fixture['panel'] . '/' . $unrelated, 'user edited unrelated source');
+                if ($case === 'unrelated override') $repairs[$unrelated] = ['beforeSha256' => hash_file('sha256', $fixture['panel'] . '/' . $unrelated), 'afterSha256' => $fixture['registry']['activeInventory'][$unrelated]];
+            } elseif ($case === 'changed marker') {
+                write($fixture['panel'] . '/' . $target, file_get_contents($fixture['panel'] . '/' . $target) . "\n// BEGIN ADDON MANAGER modified marker\n");
+                rejects(static fn () => $fixture['bootstrap']->plan(), '/markers|registration/i');
+            } elseif ($case === 'wrong before hash') $repairs[$target]['beforeSha256'] = str_repeat('0', 64);
+            elseif ($case === 'wrong after hash') $repairs[$target]['afterSha256'] = $repairs[$target]['beforeSha256'];
+            elseif ($case === 'unknown field') $repairs[$target]['override'] = true;
+            elseif ($case === 'missing field') unset($repairs[$target]['beforeSha256']);
+            else $repairs[$target]['beforeSha256'] = 'invalid hash';
+            $live = Files::inventory($fixture['panel']);
+            $state = Files::inventory($fixture['state']);
+            $result = $fixture['manager']->doctor($repairs);
+            same(false, $result['ok'], 'Invalid repair plan bypassed source drift');
+            $drift = array_values(array_filter($result['checks'], static fn (array $check): bool => $check['name'] === 'source-drift'))[0];
+            same(false, $drift['ok'], 'Invalid repair plan did not fail the source drift check');
+            check(str_contains($drift['message'], 'Prospective') || str_contains($drift['message'], 'prospective'), 'Failure did not identify the prospective registration check');
+            same($live, Files::inventory($fixture['panel']), 'Refused plan changed live source');
+            same($state, Files::inventory($fixture['state']), 'Refused plan changed retained state');
+            same($fixture['registry'], $fixture['manager']->registry());
+        });
+    });
+}
+
 $suite->test('lifecycle', 'B modifies A and removing B restores A while preserving C', function (): void {
     temporary(function (string $root): void {
         $fixture = fixture($root);
@@ -624,6 +814,70 @@ $suite->test('lifecycle', 'repeated request delivery queues and activates only o
     });
 });
 
+$suite->test('lifecycle', 'a failed request index write after enqueue remains uncertain and replays the retained operation', function (): void {
+    temporary(function (string $root): void {
+        $fixture = fixture($root);
+        $arguments = ['packageRoot' => package($root . '/package', manifest('test.index-uncertain'))];
+        $index = $fixture['state'] . '/requests/' . hash('sha256', "tests\0index-write-failure") . '.json';
+        check(symlink($root . '/missing-index-target', $index), 'Could not create deterministic request-index failure');
+        $error = rejects(static fn () => $fixture['manager']->enqueue('install', $arguments, 'tests', 'index-write-failure'), '/symbolic link/i');
+        check($error instanceof RuntimeException && !$error instanceof \AddonManager\Lifecycle\EnqueueRejectedException, 'Post-commit storage failure was classified as a definite semantic rejection');
+        $paths = glob($fixture['state'] . '/operations/*.json');
+        same(1, count($paths), 'Request-index failure did not retain exactly one durable operation');
+        $retained = Files::json($paths[0]);
+        same('queued', $retained['status']);
+        unlink($index);
+        same($retained, $fixture['manager']->enqueue('install', $arguments, 'tests', 'index-write-failure'));
+        same(1, count(glob($fixture['state'] . '/operations/*.json')), 'Retry queued a duplicate operation');
+        same($retained['id'], Files::json($index)['operationId'], 'Retry did not repair the index to the retained operation');
+        $conflict = rejects(static fn () => $fixture['manager']->enqueue('install', ['packageRoot' => $root . '/different'], 'tests', 'index-write-failure'), '/different operation arguments/i');
+        check($conflict instanceof \AddonManager\Lifecycle\EnqueueRejectedException, 'A known request-argument conflict was not a definite rejection');
+        same($retained, Files::json($paths[0]), 'Argument conflict changed the retained operation');
+    });
+});
+
+$suite->test('lifecycle', 'enqueue distinguishes known input rejection from corrupted private receipts', function (): void {
+    temporary(function (string $root): void {
+        $fixture = fixture($root);
+        $arguments = ['packageRoot' => package($root . '/package', manifest('test.rejection-types'))];
+        $badInput = rejects(static fn () => $fixture['manager']->enqueue('install', $arguments + ['unknown' => true], 'tests', 'bad-input'), '/unsupported operation argument/i');
+        check($badInput instanceof \AddonManager\Lifecycle\EnqueueRejectedException, 'Known bad arguments were not a definite rejection');
+        same([], glob($fixture['state'] . '/operations/*.json'));
+        $queued = $fixture['manager']->enqueue('install', $arguments, 'tests', 'retained-request');
+        $operationPath = $fixture['state'] . '/operations/' . $queued['id'] . '.json';
+        $corrupt = $queued;
+        unset($corrupt['action']);
+        Files::writeJson($operationPath, $corrupt);
+        $error = rejects(static fn () => $fixture['manager']->enqueue('install', $arguments, 'tests', 'retained-request'), '/invalid durable idempotency/i');
+        check(!$error instanceof \AddonManager\Lifecycle\EnqueueRejectedException, 'Corrupt private receipt was classified as a semantic rejection');
+        same($corrupt, Files::json($operationPath));
+        Files::writeJson($operationPath, $queued);
+        Files::writeJson($fixture['state'] . '/queue-sequence.json', ['next' => 'corrupt']);
+        $sequenceError = rejects(static fn () => $fixture['manager']->enqueue('install', $arguments, 'tests', 'new-request'), '/sequence is invalid/i');
+        check(!$sequenceError instanceof \AddonManager\Lifecycle\EnqueueRejectedException, 'Private sequence corruption was classified as a semantic rejection');
+        same(1, count(glob($fixture['state'] . '/operations/*.json')));
+    });
+});
+
+$suite->test('lifecycle', 'idempotent replay returns an interrupted result while new mutations remain blocked', function (): void {
+    temporary(function (string $root): void {
+        $fixture = fixture($root);
+        $arguments = ['packageRoot' => package($root . '/package', manifest('test.replay-recovery'))];
+        $queued = $fixture['manager']->enqueue('install', $arguments, 'tests', 'uncertain-delivery');
+        $queued['status'] = 'recovery_required';
+        Files::writeJson($fixture['state'] . '/operations/' . $queued['id'] . '.json', $queued);
+        $sequence = file_get_contents($fixture['state'] . '/queue-sequence.json');
+        same($queued, $fixture['manager']->enqueue('install', $arguments, 'tests', 'uncertain-delivery'));
+        unlink($fixture['state'] . '/requests/' . hash('sha256', "tests\0uncertain-delivery") . '.json');
+        same($queued, $fixture['manager']->enqueue('install', $arguments, 'tests', 'uncertain-delivery'), 'Replay failed to bridge a missing idempotency index');
+        rejects(static fn () => $fixture['manager']->enqueue('install', ['packageRoot' => $root . '/different'], 'tests', 'uncertain-delivery'), '/different operation arguments/i');
+        rejects(static fn () => $fixture['manager']->enqueue('install', $arguments, 'tests', 'new-delivery'), '/recovery/i');
+        rejects(static fn () => $fixture['manager']->enqueue('install', $arguments, 'different-actor', 'uncertain-delivery'), '/recovery/i');
+        same($sequence, file_get_contents($fixture['state'] . '/queue-sequence.json'), 'Recovery-blocked requests consumed queue mutations');
+        same(1, count(glob($fixture['state'] . '/operations/*.json')));
+    });
+});
+
 $suite->test('lifecycle', 'rapid dependency installs retain durable FIFO queue order', function (): void {
     temporary(function (string $root): void {
         $fixture = fixture($root);
@@ -661,6 +915,55 @@ $suite->test('lifecycle', 'a held deployment lock leaves queued operations untou
         same($first['id'], $fixture['manager']->workOnce()['id']);
         same($second['id'], $fixture['manager']->workOnce()['id']);
         same('succeeded', $fixture['manager']->operation($second['id'])['status']);
+    });
+});
+
+$suite->test('lifecycle', 'an installer finishing after registry publication keeps queued work untouched until release', function (): void {
+    temporary(function (string $root): void {
+        $fixture = fixture($root);
+        $path = package($root . '/package', manifest('test.installation-gate'));
+        $queued = $fixture['manager']->enqueue('install', ['packageRoot' => $path], 'tests');
+        $before = $fixture['manager']->registry();
+        $gate = $fixture['state'] . '/installer-backups/install.lock';
+        $installer = Files::lock($gate);
+        try {
+            $state = Files::inventory($fixture['state']);
+            same(null, $fixture['manager']->workOnce(), 'Worker crossed the unfinished installer gate');
+            same('queued', $fixture['manager']->operation($queued['id'])['status']);
+            same($before, $fixture['manager']->registry());
+            same($state, Files::inventory($fixture['state']), 'Busy installer changed retained manager state');
+            $deployment = Files::lock($fixture['state'] . '/deployment.lock', false);
+            check(is_resource($deployment), 'Worker retained its deployment lock after the installer blocked it');
+            fclose($deployment);
+        } finally {
+            fclose($installer);
+        }
+        same($queued['id'], $fixture['manager']->workOnce()['id']);
+        same('succeeded', $fixture['manager']->operation($queued['id'])['status']);
+        $released = Files::lock($gate, false);
+        check(is_resource($released), 'Worker retained the installer gate after completing');
+        fclose($released);
+    });
+});
+
+$suite->test('lifecycle', 'an active lifecycle holds the installer gate through callbacks and releases it after failure', function (): void {
+    temporary(function (string $root): void {
+        $gate = $root . '/state/installer-backups/install.lock';
+        $observed = false;
+        $fixture = fixture($root, ['beforeActivate' => static function () use ($gate, &$observed): void {
+            same(null, Files::lock($gate, false), 'Installer gate was released before activation completed');
+            $observed = true;
+            throw new RuntimeException('Injected activation failure while holding installer gate');
+        }]);
+        $initial = Files::lock($gate);
+        fclose($initial);
+        operation($fixture, 'install', ['packageRoot' => package($root . '/package', manifest('test.held-installer-gate'))], 'failed');
+        check($observed, 'Operation did not reach its activation callback');
+        foreach ([$gate, $fixture['state'] . '/deployment.lock'] as $path) {
+            $released = Files::lock($path, false);
+            check(is_resource($released), 'Failure retained a manager or installer lock');
+            fclose($released);
+        }
     });
 });
 
@@ -740,7 +1043,73 @@ $suite->test('lifecycle', 'delete confirmation includes installed disabled depen
     });
 });
 
-foreach (['backup:resources/views/base.blade.php', 'beforeRename:resources/views/base.blade.php', 'afterRename:resources/views/base.blade.php', 'codeActivated', 'databaseBackupReady', 'beforeMigrate', 'afterMigrate', 'insideMigrate', 'beforeRegistryCommit', 'afterRegistryCommit'] as $checkpoint) {
+foreach (['replace', 'create', 'delete'] as $writeKind) {
+    $suite->test('lifecycle', 'a live edit immediately before ' . $writeKind . ' activation is preserved for recovery', function () use ($writeKind): void {
+        temporary(function (string $root) use ($writeKind): void {
+            $target = $writeKind === 'replace' ? 'resources/views/base.blade.php' : 'resources/views/late-edit.blade.php';
+            $armed = false;
+            $manual = 'user edit at the final activation boundary';
+            $fixture = fixture($root, ['checkpoint' => static function (string $step) use (&$armed, $target, $root, $manual): void {
+                if ($armed && $step === 'beforeRename:' . $target) write($root . '/panel/' . $target, $manual);
+            }]);
+            $definition = manifest('test.late-' . $writeKind);
+            $payloads = [];
+            if ($writeKind === 'replace') {
+                $definition['patches'][] = \AddonManager\Tests\patchDeclaration('base', $target, 'panel', 'find.txt', 'replace.txt', 'summary=BASE', 'summary=ADDON');
+                $payloads = ['find.txt' => 'summary=BASE', 'replace.txt' => 'summary=ADDON'];
+            } else {
+                $definition['files'][] = fileDeclaration('payload.txt', $target, 'owned addon file');
+                $payloads = ['payload.txt' => 'owned addon file'];
+            }
+            $path = package($root . '/package', $definition, $payloads);
+            if ($writeKind === 'delete') operation($fixture, 'install', ['packageRoot' => $path]);
+            $before = $fixture['manager']->registry();
+            $armed = true;
+            $action = $writeKind === 'delete' ? 'delete' : 'install';
+            $arguments = $writeKind === 'delete' ? ['addonId' => $definition['id']] : ['packageRoot' => $path];
+            $failed = operation($fixture, $action, $arguments, 'recovery_required');
+            check(str_contains($failed['error'], 'drift'), 'Late edit did not report live source drift');
+            same($manual, file_get_contents($fixture['panel'] . '/' . $target), 'Activation overwrote the late user edit');
+            same($before, $fixture['manager']->registry(), 'Activation committed a registry over the late user edit');
+            if (isset($before['activeInventory'][$target])) Files::atomic($fixture['panel'] . '/' . $target, $writeKind === 'delete' ? 'owned addon file' : "baseline header\nsummary=BASE\nfooter=BASE\n");
+            else unlink($fixture['panel'] . '/' . $target);
+            same(true, $fixture['manager']->recover($failed['id'])['ok'], 'Recovery did not resume after the user resolved the drift');
+            same($before, $fixture['manager']->registry());
+        });
+    });
+}
+
+foreach (['replacement', 'modified bytes'] as $change) {
+    $suite->test('lifecycle', 'activation and recovery preserve ' . $change . ' at a journaled temporary path', function () use ($change): void {
+        temporary(function (string $root) use ($change): void {
+            $temporary = null;
+            $manual = 'user-owned replacement temporary contents';
+            $fixture = fixture($root, ['checkpoint' => static function (string $step, array $operation, array $journal) use ($change, $root, $manual, &$temporary): void {
+                if ($step !== 'beforeRename:resources/views/base.blade.php') return;
+                $entry = array_values(array_filter($journal['files'], static fn (array $entry): bool => $entry['path'] === 'resources/views/base.blade.php'))[0];
+                $temporary = $root . '/panel/' . $entry['temporary'];
+                if ($change === 'replacement') check(rename($temporary, $root . '/retained-owned-temporary'), 'Could not retain the original temporary inode');
+                write($temporary, $manual);
+            }]);
+            $definition = manifest('test.temporary');
+            $definition['patches'][] = \AddonManager\Tests\patchDeclaration('base', 'resources/views/base.blade.php', 'panel', 'find.txt', 'replace.txt', 'summary=BASE', 'summary=ADDON');
+            $path = package($root . '/package', $definition, ['find.txt' => 'summary=BASE', 'replace.txt' => 'summary=ADDON']);
+            $before = $fixture['manager']->registry();
+            $failed = operation($fixture, 'install', ['packageRoot' => $path], 'recovery_required');
+            check(str_contains($failed['error'], 'temporary file changed'), 'Temporary replacement was not detected before rename');
+            same($manual, file_get_contents($temporary), 'Cleanup deleted or overwrote unexpected temporary contents');
+            same("baseline header\nsummary=BASE\nfooter=BASE\n", file_get_contents($fixture['panel'] . '/resources/views/base.blade.php'));
+            same($before, $fixture['manager']->registry());
+            same(false, $fixture['manager']->recover($failed['id'])['ok'], 'Recovery claimed it could delete an unexpected temporary file');
+            same($manual, file_get_contents($temporary));
+            unlink($temporary);
+            same(true, $fixture['manager']->recover($failed['id'])['ok']);
+            same($before, $fixture['manager']->registry());
+        });
+    });
+}
+
+foreach (['backup:resources/views/base.blade.php', 'temporaryCreated:resources/views/base.blade.php', 'beforeRename:resources/views/base.blade.php', 'afterRename:resources/views/base.blade.php', 'codeActivated', 'databaseBackupReady', 'beforeMigrate', 'afterMigrate', 'insideMigrate', 'beforeRegistryCommit', 'afterRegistryCommit'] as $checkpoint) {
     $suite->test('recovery', ($checkpoint === 'insideMigrate' ? 'uncertain migration keeps maintenance and recovery_required at ' : 'terminated worker recovers consistently at ') . $checkpoint, function () use ($checkpoint): void {
         temporary(function (string $root) use ($checkpoint): void {
             $fixture = fixture($root);

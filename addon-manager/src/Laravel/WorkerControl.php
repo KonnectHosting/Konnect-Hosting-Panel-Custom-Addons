@@ -11,12 +11,18 @@ final class WorkerControl
 {
     private string $binary;
     private array $groups;
+    private int $timeout = 30;
 
     public function __construct(array $settings)
     {
         if (($settings['driver'] ?? null) !== 'supervisor' || array_diff(array_keys($settings), ['driver', 'binary', 'groups', 'timeout']) !== []) {
             throw new RuntimeException('Configure host workerControl {driver:"supervisor",groups:["pteroq","panel-php-fpm"]} with narrowly scoped supervisor permission for the deployment worker.');
         }
+        $timeout = array_key_exists('timeout', $settings) ? $settings['timeout'] : 30;
+        if (!is_int($timeout) || $timeout < 1 || $timeout > 300) {
+            throw new RuntimeException('Supervisor timeout must be an integer between 1 and 300 seconds.');
+        }
+        $this->timeout = $timeout;
         $this->binary = $settings['binary'] ?? '/usr/bin/supervisorctl';
         if (!in_array($this->binary, ['/usr/bin/supervisorctl', '/usr/local/bin/supervisorctl'], true) || !is_executable($this->binary)) {
             throw new RuntimeException('Supported supervisorctl binary is unavailable.');
@@ -109,28 +115,55 @@ final class WorkerControl
         fclose($pipes[0]);
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
-        $deadline = microtime(true) + 30;
+        $deadline = microtime(true) + $this->timeout;
         $output = '';
-        do {
-            $output .= stream_get_contents($pipes[1]);
-            stream_get_contents($pipes[2]);
-            $status = proc_get_status($process);
-            if (!$status['running']) {
-                break;
+        $diagnosticBytes = 0;
+        try {
+            do {
+                $output .= stream_get_contents($pipes[1], 65536);
+                $diagnosticBytes += strlen(stream_get_contents($pipes[2], 65536));
+                $status = proc_get_status($process);
+                if (strlen($output) + $diagnosticBytes > 65536) {
+                    throw new RuntimeException('Supervised service control exceeded its output limit.');
+                }
+                if (!$status['running']) {
+                    break;
+                }
+                if (microtime(true) > $deadline) {
+                    throw new RuntimeException('Supervised service control timed out. Verify stopwaitsecs and scoped permission.');
+                }
+                usleep(20000);
+            } while (true);
+            $output .= stream_get_contents($pipes[1], 65536);
+            $diagnosticBytes += strlen(stream_get_contents($pipes[2], 65536));
+            if (strlen($output) + $diagnosticBytes > 65536) {
+                throw new RuntimeException('Supervised service control exceeded its output limit.');
             }
-            if (microtime(true) > $deadline || strlen($output) > 65536) {
-                proc_terminate($process);
-                fclose($pipes[1]);
-                fclose($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $exit = proc_close($process);
+            $process = null;
+            return ['exit' => $exit === -1 ? ($status['exitcode'] ?? -1) : $exit, 'output' => $output];
+        } finally {
+            if (is_resource($process)) {
+                $status = proc_get_status($process);
+                if ($status['running']) {
+                    proc_terminate($process);
+                    $killDeadline = microtime(true) + 1;
+                    do {
+                        stream_get_contents($pipes[1], 65536);
+                        stream_get_contents($pipes[2], 65536);
+                        $status = proc_get_status($process);
+                        if (!$status['running']) break;
+                        usleep(20000);
+                    } while (microtime(true) < $killDeadline);
+                    if ($status['running']) proc_terminate($process, 9);
+                }
+                foreach ($pipes as $pipe) {
+                    if (is_resource($pipe)) fclose($pipe);
+                }
                 proc_close($process);
-                throw new RuntimeException('Supervised service control timed out. Verify stopwaitsecs and scoped permission.');
             }
-            usleep(20000);
-        } while (true);
-        $output .= stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exit = proc_close($process);
-        return ['exit' => $exit === -1 ? ($status['exitcode'] ?? -1) : $exit, 'output' => $output];
+        }
     }
 }

@@ -1,4 +1,4 @@
-# Moving to Addon Manager 2.0.0
+# Moving to Addon Manager 2.x
 
 Addon Manager 2.0.0 uses `addon-manager/`, the PHP namespace `AddonManager`,
 `storage/app/addon-manager/`, `addon_manager_*` SQL tables, and
@@ -122,6 +122,39 @@ installation through the neutral manager; the fresh registry does not establish
 that previously applied migrations are safe to execute again.
 
 ## Retained neutral state
+
+### Updating 2.0.0 to 2.0.1
+
+Test the update on a private staging copy first. Back up Panel code, database,
+and the complete private manager state outside the Panel tree. Finish queued
+operations and resolve interrupted deployments with the original release before
+replacing the loader. Stop the management worker and use the deployment's
+maintenance and service-drain procedure while replacing the complete
+`addon-manager/` folder. Keep private state and SQL history in their existing
+locations; do not overlay stale loader files or copy them into the retained
+Panel baseline.
+
+Run the new installer's dry run, repeat installation, and both host and manager
+diagnostics before resuming the worker and normal services. Clean retained
+2.0.0 state is supported. Version 2.0.1 checks the actual runtime against addon
+compatibility ranges, so a package pinned only to manager `=2.0.0` needs a
+reviewed compatibility update. The manifest format and `^2.0` SDK example
+constraints are unchanged.
+
+The stricter checks preserve and reject unexpected baseline bytes or credential
+stores retained by 2.0.0, including authentication-bearing npm/yarn configuration.
+They do not silently recapture a baseline or change its ledger. An interrupted
+2.0.0 journal with an existing temporary file but no inode ownership receipt
+also requires operator review; 2.0.1 preserves that file rather than deleting it.
+If these checks fail, keep backups and complete an explicit staging recovery or
+baseline review. Do not delete the registry, migration history, temporary file,
+or snapshot merely to make a check pass.
+
+Reload the admin page after updating. Asset URLs include the manager version so
+the browser fetches the new client. Mutation requests now require
+`X-Addon-Manager-Actor` to match the authenticated administrator ID. An old tab
+or a changed session is refused before enqueue; preserved pending request IDs
+must be retried through the matching account after refresh.
 
 For repeat installation of the neutral distribution, keep its existing private
 state, retained baseline, and SQL tables in their original locations. The

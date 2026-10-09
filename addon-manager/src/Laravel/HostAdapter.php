@@ -22,9 +22,26 @@ final class HostAdapter
     public function __construct(private readonly object $app, ?array $settings = null)
     {
         $this->panelRoot = $app->basePath();
-        $this->stateRoot = $app->storagePath('app/addon-manager');
+        Files::noLinks($this->panelRoot);
+        $stateRoot = rtrim($app->storagePath('app/addon-manager'), '/');
+        if (!str_starts_with($stateRoot, '/') || preg_match('#(?:^|/)\.{1,2}(?:/|$)#', $stateRoot)) {
+            throw new RuntimeException('Private manager state must use an absolute path without traversal segments.');
+        }
+        $stateRoot = '/' . implode('/', array_filter(explode('/', $stateRoot), static fn (string $part): bool => $part !== ''));
+        Files::noLinks($stateRoot);
+        $panelRoot = realpath($this->panelRoot);
+        if ($panelRoot === false) {
+            throw new RuntimeException('Panel root must be an existing real directory.');
+        }
+        foreach ([$panelRoot . '/public', $panelRoot . '/storage/app/public'] as $public) {
+            if ($stateRoot === $public || str_starts_with($stateRoot, $public . '/')) {
+                throw new RuntimeException('Manager state must be outside all publicly served directories.');
+            }
+        }
+        $this->stateRoot = $stateRoot;
         $file = $this->stateRoot . '/host.json';
-        $this->settings = $settings ?? (is_file($file) ? json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR) : []);
+        Files::noLinks($file);
+        $this->settings = $settings ?? (is_file($file) ? Files::json($file) : []);
     }
 
     public static function boot(string $panelRoot): self

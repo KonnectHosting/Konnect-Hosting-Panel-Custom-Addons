@@ -4,7 +4,7 @@
 
 @section('scripts')
     @parent
-    <link rel="stylesheet" href="{{ $assetBase ?? asset('addon-manager/build') }}/manager.v1.css">
+    <link rel="stylesheet" href="{{ $assetBase ?? asset('addon-manager/build') }}/manager.v1.css?v={{ ADDON_MANAGER_VERSION }}">
 @endsection
 
 @section('content-header')
@@ -44,7 +44,7 @@
         <div class="am-stat"><span id="am-count-disabled">—</span><span>Disabled</span></div>
     </section>
 
-    <section class="am-card am-operation" id="am-operation" aria-labelledby="am-operation-title" hidden>
+    <section class="am-card am-operation" id="am-operation" aria-labelledby="am-operation-title" tabindex="-1" hidden>
         <div class="am-section-heading">
             <div><span class="am-eyebrow">LATEST OPERATION</span><h3 id="am-operation-title">Operation progress</h3></div>
             <span class="am-badge" id="am-operation-status">Queued</span>
@@ -97,5 +97,5 @@
 
 @section('footer-scripts')
     @parent
-    <script src="{{ $assetBase ?? asset('addon-manager/build') }}/manager.v1.js" defer></script>
+    <script src="{{ $assetBase ?? asset('addon-manager/build') }}/manager.v1.js?v={{ ADDON_MANAGER_VERSION }}" defer></script>
 @endsection

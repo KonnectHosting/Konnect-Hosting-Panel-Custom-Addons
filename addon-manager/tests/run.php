@@ -7,7 +7,7 @@ require dirname(__DIR__) . '/bootstrap.php';
 require __DIR__ . '/Support.php';
 
 $suite = new \AddonManager\Tests\Suite();
-foreach (['CoreTest.php', 'LifecycleTest.php', 'BootstrapTest.php', 'SDKTest.php', 'NativeBuildIntegration.php'] as $file) require __DIR__ . '/' . $file;
+foreach (['CoreTest.php', 'LifecycleTest.php', 'BootstrapTest.php', 'SDKTest.php', 'CliTest.php', 'LaravelAdapterTest.php', 'NativeBuildIntegration.php'] as $file) require __DIR__ . '/' . $file;
 try {
     exit($suite->run(array_slice($argv, 1)));
 } catch (Throwable $error) {

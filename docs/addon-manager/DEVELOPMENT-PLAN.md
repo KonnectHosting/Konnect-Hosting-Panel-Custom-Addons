@@ -1,7 +1,7 @@
 # Addon Manager development plan
 
 Status: the implementation is complete as a development candidate; the
-neutral distribution is Addon Manager 2.0.0. This document preserves the design
+neutral distribution is Addon Manager 2.0.1. This document preserves the design
 and acceptance criteria. Manifest format version 1 remains supported; manager
 2.0.0 is a breaking API release and requires matching package compatibility.
 The [administrator guide](../../addon-manager/docs/ADMINISTRATOR.md),
@@ -86,7 +86,7 @@ release through SSH as an alternative to copying it; no production Git checkout
 is required. Use a fresh distribution and follow the
 [upgrade guide](../../addon-manager/docs/UPGRADING.md) before replacing an older
 manager. Active legacy registration or state is refused; automatic migration
-is outside version 2.0.0.
+is outside version 2.x.
 
 The installer must be repeatable. It checks PHP/extensions, panel bootability,
 database connectivity, writable destinations, disk space, queue/worker setup,

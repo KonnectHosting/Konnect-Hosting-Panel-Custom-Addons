@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace AddonManager\Installer;
 
+use AddonManager\Storage\Files;
 use RuntimeException;
 
 final class SourceProfile
 {
     public const BOOTSTRAP_BLOCK = "// BEGIN ADDON MANAGER\nrequire_once \$app->basePath('addon-manager/bootstrap.php');\n\$app->register(\\AddonManager\\Laravel\\AddonManagerServiceProvider::class);\n// END ADDON MANAGER\n\n";
     public const NAV_BLOCK = "                        {{-- BEGIN ADDON MANAGER --}}\n                        @includeIf('addon-manager::navigation')\n                        {{-- END ADDON MANAGER --}}\n";
+    public const BOOTSTRAP_ANCHOR = 'return $app;';
+    public const NAV_ANCHOR = "                    </ul>\n                </section>\n            </aside>";
 
     public function __construct(private readonly ?string $profileFile = null)
     {
@@ -42,7 +45,8 @@ final class SourceProfile
                             throw new RuntimeException('Invalid retained baseline identity.');
                         }
                         $expectedRoot = $stateRoot . '/baselines/' . $registry['baselineId'] . '/files';
-                        if (realpath($registry['baselineRoot']) !== realpath($expectedRoot)) {
+                        Files::noLinks($expectedRoot);
+                        if (!is_string($registry['baselineRoot'] ?? null) || !is_dir($expectedRoot) || realpath($registry['baselineRoot']) !== realpath($expectedRoot)) {
                             throw new RuntimeException('Unexpected retained baseline path.');
                         }
                         $this->assertNoSymlinks($expectedRoot, $relative);
@@ -90,6 +94,10 @@ final class SourceProfile
             if (substr_count($bytes, $block) !== 1 || substr_count($bytes, 'BEGIN ADDON MANAGER') !== 1 || substr_count($bytes, 'END ADDON MANAGER') !== 1) {
                 throw new RuntimeException('Manager registration markers are modified or duplicated: ' . $relative);
             }
+            $anchor = $relative === 'bootstrap/app.php' ? self::BOOTSTRAP_ANCHOR : self::NAV_ANCHOR;
+            if (substr_count($bytes, $block . $anchor) !== 1) {
+                throw new RuntimeException('Manager registration is outside its supported anchor: ' . $relative);
+            }
             return str_replace($block, '', $bytes);
         }
         return $bytes;
@@ -133,12 +141,6 @@ final class SourceProfile
 
     public function assertNoSymlinks(string $root, string $relative): void
     {
-        $path = rtrim($root, '/');
-        foreach (explode('/', $relative) as $part) {
-            $path .= '/' . $part;
-            if (is_link($path)) {
-                throw new RuntimeException('Symlink is not supported in a bootstrap integration path: ' . $relative);
-            }
-        }
+        Files::noLinks(rtrim($root, '/') . '/' . Files::relative($relative));
     }
 }

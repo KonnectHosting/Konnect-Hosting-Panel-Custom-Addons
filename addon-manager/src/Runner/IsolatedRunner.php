@@ -61,7 +61,7 @@ final class IsolatedRunner
                 }
                 $expected['routes'] += count($extensions['routes'] ?? []) + count($extensions['pages'] ?? []);
             }
-            if (!is_array($checks) || ($checks['passed'] ?? false) !== true || ($checks['laravelBoot'] ?? false) !== true || !is_int($checks['phpFiles'] ?? null) || $checks['phpFiles'] < 0 || !is_int($checks['baselinePhpFiles'] ?? null) || $checks['baselinePhpFiles'] + $checks['phpFiles'] < 1 || array_intersect_key($checks, $expected) !== $expected) {
+            if (!is_array($checks) || ($checks['passed'] ?? false) !== true || ($checks['laravelBoot'] ?? false) !== true || !is_int($checks['phpFiles'] ?? null) || $checks['phpFiles'] < 0 || !is_int($checks['baselinePhpFiles'] ?? null) || $checks['baselinePhpFiles'] < 0 || $checks['baselinePhpFiles'] + $checks['phpFiles'] < 1 || array_intersect_key($checks, $expected) !== $expected) {
                 throw new RuntimeException('Isolated PHP validation did not produce a successful result.');
             }
             return ['isolated' => true, 'checks' => $checks];
@@ -96,7 +96,7 @@ final class IsolatedRunner
         try {
             $command = $this->container($image, $stage, $job, true);
             $assets = $this->containedDirectory($stage . '/public/assets', $stage);
-            $command = array_merge($command, ['--mount', 'type=bind,src=' . $modules . ',dst=/work/node_modules,readonly', '--mount', 'type=bind,src=' . $assets . ',dst=/baseline-assets,readonly', '--tmpfs', '/work/public/assets:rw,nosuid,size=128m,uid=' . ($this->rootless ? 0 : posix_geteuid()) . ',gid=' . ($this->rootless ? 0 : posix_getegid()), $image, 'node', '/runner/build.js']);
+            $command = array_merge($command, ['--mount', $this->mount($modules, '/work/node_modules'), '--mount', $this->mount($assets, '/baseline-assets'), '--tmpfs', '/work/public/assets:rw,nosuid,size=128m,uid=' . ($this->rootless ? 0 : posix_geteuid()) . ',gid=' . ($this->rootless ? 0 : posix_getegid()), $image, 'node', '/runner/build.js']);
             $this->process($command, $this->timeout(), $job . '/output.bin', 129 * 1024 * 1024);
             $this->receiveAssets($job . '/output.bin', $stage);
             $outputs = [];
@@ -149,11 +149,11 @@ final class IsolatedRunner
         foreach (array_merge(['storage', 'bootstrap/cache'], $building ? ['node_modules'] : ['vendor', 'addon-manager']) as $point) {
             Files::directory($stage . '/' . $point);
         }
-        $command = ['docker', 'run', '--name', 'addon-manager-stage-' . bin2hex(random_bytes(10)), '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', $memory, '--cpus', $cpus, '--user', $uid . ':' . $gid, '--workdir', '/work', '--tmpfs', '/tmp:rw,noexec,nosuid,size=128m,uid=' . $uid . ',gid=' . $gid, '--tmpfs', '/work/storage:rw,nosuid,size=64m,uid=' . $uid . ',gid=' . $gid, '--tmpfs', '/work/bootstrap/cache:rw,noexec,nosuid,size=16m,uid=' . $uid . ',gid=' . $gid, '--mount', 'type=bind,src=' . $stage . ',dst=/work,readonly', '--mount', 'type=bind,src=' . $job . ',dst=/job,readonly', '--mount', 'type=bind,src=' . __DIR__ . ',dst=/runner,readonly', '--env', 'APP_ENV=testing', '--env', 'APP_DEBUG=false', '--env', 'APP_ENVIRONMENT_ONLY=true', '--env', 'APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', '--env', 'DB_CONNECTION=sqlite', '--env', 'DB_DATABASE=/tmp/validation.sqlite', '--env', 'CACHE_STORE=array', '--env', 'CACHE_DRIVER=array', '--env', 'SESSION_DRIVER=array', '--env', 'QUEUE_CONNECTION=sync', '--env', 'LOG_CHANNEL=stderr'];
+        $command = ['docker', 'run', '--name', 'addon-manager-stage-' . bin2hex(random_bytes(10)), '--rm', '--pull=never', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', $memory, '--cpus', $cpus, '--user', $uid . ':' . $gid, '--workdir', '/work', '--tmpfs', '/tmp:rw,noexec,nosuid,size=128m,uid=' . $uid . ',gid=' . $gid, '--tmpfs', '/work/storage:rw,nosuid,size=64m,uid=' . $uid . ',gid=' . $gid, '--tmpfs', '/work/bootstrap/cache:rw,noexec,nosuid,size=16m,uid=' . $uid . ',gid=' . $gid, '--mount', $this->mount($stage, '/work'), '--mount', $this->mount($job, '/job'), '--mount', $this->mount(__DIR__, '/runner'), '--env', 'APP_ENV=testing', '--env', 'APP_DEBUG=false', '--env', 'APP_ENVIRONMENT_ONLY=true', '--env', 'APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', '--env', 'DB_CONNECTION=sqlite', '--env', 'DB_DATABASE=/tmp/validation.sqlite', '--env', 'CACHE_STORE=array', '--env', 'CACHE_DRIVER=array', '--env', 'SESSION_DRIVER=array', '--env', 'QUEUE_CONNECTION=sync', '--env', 'LOG_CHANNEL=stderr'];
         if (!$building) {
             $vendor = $this->containedDirectory($this->panelRoot . '/vendor', $this->panelRoot);
             $manager = realpath(dirname(__DIR__, 2));
-            $command = array_merge($command, ['--mount', 'type=bind,src=' . $vendor . ',dst=/work/vendor,readonly', '--mount', 'type=bind,src=' . $manager . ',dst=/work/addon-manager,readonly', $image]);
+            $command = array_merge($command, ['--mount', $this->mount($vendor, '/work/vendor'), '--mount', $this->mount($manager, '/work/addon-manager'), $image]);
         }
         return $command;
     }
@@ -170,6 +170,9 @@ final class IsolatedRunner
 
     private function security(): void
     {
+        if (!function_exists('posix_geteuid') || !function_exists('posix_getegid')) {
+            throw new RuntimeException('The isolated runner requires the PHP POSIX extension.');
+        }
         if ($this->rootless !== null) {
             return;
         }
@@ -198,12 +201,17 @@ final class IsolatedRunner
                 throw new RuntimeException('Staging contains a protected path: ' . $name);
             }
         }
-        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($stage, \FilesystemIterator::SKIP_DOTS)) as $file) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($stage, \FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST) as $file) {
             if ($file->isLink()) {
                 throw new RuntimeException('Staging must not contain symlinks.');
             }
-            if ($file->isFile() && (preg_match('/^\.env(?:\.|$)/i', $file->getBasename()) || preg_match('/\.(?:pem|key|p12|pfx)$/i', $file->getBasename()))) {
+            $name = $file->getBasename();
+            $configuration = $file->isFile() && in_array(strtolower($name), ['.npmrc', '.yarnrc', '.yarnrc.yml'], true) ? Files::read($file->getPathname()) : null;
+            if (Files::sensitive($name, $configuration)) {
                 throw new RuntimeException('Staging must not contain environment credentials or private-key files.');
+            }
+            if (!$file->isFile() && !$file->isDir()) {
+                throw new RuntimeException('Staging must contain only regular files and directories.');
             }
         }
         return $stage;
@@ -211,12 +219,24 @@ final class IsolatedRunner
 
     private function containedDirectory(string $path, string $parent): string
     {
+        Files::noLinks($path);
+        Files::noLinks($parent);
         $real = realpath($path);
         $root = realpath($parent);
         if (!$real || !$root || !is_dir($real) || is_link($path) || !str_starts_with($real, rtrim($root, '/') . '/')) {
             throw new RuntimeException('Required directory is missing or outside its allowed root: ' . basename($path));
         }
         return $real;
+    }
+
+    private function mount(string $source, string $destination): string
+    {
+        Files::noLinks($source);
+        // Docker parses --mount as CSV, even when proc_open uses an argument array.
+        if (preg_match('/[,"\x00-\x1f\x7f]/', $source)) {
+            throw new RuntimeException('Runner mount paths cannot contain CSV delimiters or control characters.');
+        }
+        return 'type=bind,src=' . $source . ',dst=' . $destination . ',readonly';
     }
 
     private function job(array $manifests, array $operation): string
@@ -229,14 +249,13 @@ final class IsolatedRunner
         }
         $contents = json_encode(['manifests' => $manifests, 'baselineHashes' => $baseline, 'operation' => ['id' => $operation['id'] ?? null]], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         $directory = rtrim($this->stateRoot, '/') . '/runner-jobs/' . bin2hex(random_bytes(12));
-        if (!mkdir($directory, 0700, true) && !is_dir($directory)) {
-            throw new RuntimeException('Cannot create isolated runner job.');
-        }
-        if (file_put_contents($directory . '/input.json', $contents) === false) {
+        Files::directory($directory);
+        try {
+            Files::atomic($directory . '/input.json', $contents, 0600);
+        } catch (Throwable $error) {
             $this->removeJob($directory);
-            throw new RuntimeException('Cannot write isolated runner input.');
+            throw $error;
         }
-        chmod($directory . '/input.json', 0600);
         return $directory;
     }
 
@@ -280,6 +299,9 @@ final class IsolatedRunner
                     throw new RuntimeException('Generated assets exceed the bounded output limits.');
                 }
                 $relative = $read($header['length']);
+                if ($relative === 'manifest.json' && $header['size'] > 2 * 1024 * 1024) {
+                    throw new RuntimeException('Generated asset manifest exceeds its bounded output limit.');
+                }
                 Paths::assertTarget('public/assets/' . $relative);
                 $folded = strtolower($relative);
                 if (isset($seen[$folded]) || isset($directories[$folded])) {

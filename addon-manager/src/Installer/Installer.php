@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AddonManager\Installer;
 
 use AddonManager\Laravel\HostAdapter;
+use AddonManager\Storage\Files;
 use RuntimeException;
 use Throwable;
 
@@ -33,8 +34,10 @@ final class Installer
         $plan = $bootstrap->plan();
         $host = HostAdapter::boot($this->panelRoot);
         $stateRoot = $host->stateRoot;
+        $this->validatePrivateState($stateRoot);
         $settingsFile = $stateRoot . '/host.json';
-        $existing = is_file($settingsFile) ? json_decode((string) file_get_contents($settingsFile), true, 512, JSON_THROW_ON_ERROR) : [];
+        Files::noLinks($settingsFile);
+        $existing = is_file($settingsFile) ? Files::json($settingsFile) : [];
         $settings = array_replace($existing, $configuration, ['schemaVersion' => 1, 'profile' => $plan['profile']['id'], 'host' => $plan['profile']['host'], 'baselineOwners' => $plan['profile']['baselineOwners'], 'baselineWarnings' => $plan['profile']['baselineWarnings'] ?? []]);
         $preflight = (new HostAdapter($host->application(), $settings))->doctor();
         $report = ['success' => false, 'dryRun' => $dryRun, 'profile' => $plan['profile']['id'], 'host' => $plan['profile']['host'], 'warnings' => $settings['baselineWarnings'], 'preflight' => $preflight, 'changes' => array_keys($plan['changes']), 'managerUrl' => '/admin/addon-manager'];
@@ -43,67 +46,103 @@ final class Installer
             return $report;
         }
         if ($dryRun) {
+            $stateChecks = $this->existingStateChecks(new HostAdapter($host->application(), $settings), $plan['changes']);
+            if ($stateChecks !== null) {
+                $report['managerDoctor'] = $stateChecks;
+                if (!$stateChecks['ok']) {
+                    $report['message'] = $this->stateFailure($stateChecks);
+                    return $report;
+                }
+            }
             $report['success'] = true;
             return $report;
         }
-        $this->ensurePrivateState($stateRoot);
-        $this->saveSettings($settingsFile, $settings);
-        $result = $bootstrap->apply();
-        try {
-            $report['createdTables'] = $host->installTables();
-            $report['assets'] = $this->deployAssets();
-            $host->clearCaches();
-            $readiness = $host->readiness();
-            if (!$readiness['ready']) {
-                throw new RuntimeException($readiness['message']);
-            }
-            $report['readiness'] = $readiness;
+        return $bootstrap->synchronized(function () use ($bootstrap, $host, $stateRoot, $settingsFile, $configuration, $plan, $report): array {
+            $plan = $bootstrap->plan();
+            $existing = is_file($settingsFile) ? Files::json($settingsFile) : [];
+            $settings = array_replace($existing, $configuration, ['schemaVersion' => 1, 'profile' => $plan['profile']['id'], 'host' => $plan['profile']['host'], 'baselineOwners' => $plan['profile']['baselineOwners'], 'baselineWarnings' => $plan['profile']['baselineWarnings'] ?? []]);
             $configuredHost = new HostAdapter($host->application(), $settings);
-            if (!is_file($stateRoot . '/registry.json')) {
-                $report['baseline'] = $configuredHost->manager()->initialize($plan['profile']['host']);
+            $stateChecks = $this->existingStateChecks($configuredHost, $plan['changes']);
+            if ($stateChecks !== null && !$stateChecks['ok']) {
+                throw new RuntimeException($this->stateFailure($stateChecks));
             }
-            $report['success'] = true;
-            $report['changed'] = $result['changed'];
-            $report['doctor'] = $configuredHost->doctor();
-            $report['message'] = $report['doctor']['ready'] ? 'Manager installation and operation prerequisites are ready.' : 'Manager installed. Complete the management-worker and isolated-runner checks before installing addons.';
-            return $report;
-        } catch (Throwable $e) {
-            // Only changes made by this invocation are reverted. A retry never removes
-            // a registration that was already present before it started.
-            if ($result['changed'] !== []) {
-                $report['rollback'] = $bootstrap->restore();
+            $this->ensurePrivateState($stateRoot);
+            $this->saveSettings($settingsFile, $settings);
+            $result = $bootstrap->apply();
+            try {
+                $report['createdTables'] = $host->installTables();
+                $report['assets'] = $this->deployAssets();
+                $host->clearCaches();
+                $readiness = $host->readiness();
+                if (!$readiness['ready']) {
+                    throw new RuntimeException($readiness['message']);
+                }
+                $report['readiness'] = $readiness;
+                $manager = $configuredHost->manager();
+                if (!is_file($stateRoot . '/registry.json')) {
+                    $report['baseline'] = $manager->initialize($plan['profile']['host']);
+                }
+                $report['managerDoctor'] = $manager->doctor();
+                if (!$report['managerDoctor']['ok']) {
+                    throw new RuntimeException($this->stateFailure($report['managerDoctor']));
+                }
+                $report['success'] = true;
+                $report['changed'] = $result['changed'];
+                $report['doctor'] = $configuredHost->doctor();
+                $report['message'] = $report['doctor']['ready'] ? 'Manager installation and operation prerequisites are ready.' : 'Manager installed. Complete the management-worker and isolated-runner checks before installing addons.';
+                return $report;
+            } catch (Throwable $e) {
+                // Only changes made by this invocation are reverted. A retry never removes
+                // a registration that was already present before it started.
+                if ($result['changed'] !== []) {
+                    $report['rollback'] = $bootstrap->restore($result['changed']);
+                }
+                $host->clearCaches();
+                throw new RuntimeException('Initial manager readiness failed; bootstrap changes from this invocation were restored. Manager tables/data and private diagnostics remain for a safe retry. ' . $e->getMessage(), 0, $e);
             }
-            $host->clearCaches();
-            throw new RuntimeException('Initial manager readiness failed; bootstrap changes from this invocation were restored. Manager tables/data and private diagnostics remain for a safe retry. ' . $e->getMessage(), 0, $e);
-        }
+        });
+    }
+
+    private function existingStateChecks(HostAdapter $host, array $changes): ?array
+    {
+        $registry = $host->stateRoot . '/registry.json';
+        Files::noLinks($registry);
+        // A fresh dry run must not create manager directories or capture a baseline.
+        if (!is_file($registry)) return null;
+        $repairs = array_map(static fn (array $change): array => array_intersect_key($change, array_flip(['beforeSha256', 'afterSha256'])), $changes);
+        return $host->manager()->doctor($repairs);
+    }
+
+    private function stateFailure(array $checks): string
+    {
+        $failed = array_filter($checks['checks'], static fn (array $check): bool => !$check['ok']);
+        return 'Manager state checks failed: ' . implode('; ', array_map(static fn (array $check): string => $check['name'] . ': ' . $check['message'], $failed));
     }
 
     private function ensurePrivateState(string $path): void
     {
+        $this->validatePrivateState($path);
+        Files::directory($path);
+        if (!chmod($path, 0700)) {
+            throw new RuntimeException('Cannot secure private manager state.');
+        }
+    }
+
+    private function validatePrivateState(string $path): void
+    {
         $canonicalPanel = realpath($this->panelRoot);
-        if ($canonicalPanel === false || !str_starts_with($path, $canonicalPanel . '/storage/app/') || str_contains($path, '/storage/app/public/')) {
+        $publicStorage = $canonicalPanel . '/storage/app/public';
+        if ($canonicalPanel === false || !str_starts_with($path, $canonicalPanel . '/storage/app/') || $path === $publicStorage || str_starts_with($path, $publicStorage . '/')) {
             throw new RuntimeException('Private manager state must be inside Panel storage/app and outside public storage.');
         }
-        $current = $canonicalPanel;
-        foreach (explode('/', substr($path, strlen($canonicalPanel) + 1)) as $part) {
-            $current .= '/' . $part;
-            if (is_link($current)) {
-                throw new RuntimeException('Private manager state cannot use symlinks.');
-            }
-        }
-        if (!is_dir($path) && !mkdir($path, 0700, true) && !is_dir($path)) {
-            throw new RuntimeException('Cannot create private manager state.');
-        }
-        chmod($path, 0700);
+        Files::relative(substr($path, strlen($canonicalPanel) + 1));
+        Files::noLinks($path);
     }
 
     private function saveSettings(string $path, array $settings): void
     {
-        $temporary = $path . '.tmp-' . bin2hex(random_bytes(6));
         $bytes = json_encode($settings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-        if (file_put_contents($temporary, $bytes, LOCK_EX) !== strlen($bytes) || !chmod($temporary, 0600) || !rename($temporary, $path)) {
-            throw new RuntimeException('Cannot save private host configuration.');
-        }
+        Files::atomic($path, $bytes, 0600);
     }
 
     private function deployAssets(): array
@@ -111,6 +150,7 @@ final class Installer
         $source = $this->managerRoot . '/public/build';
         $destination = $this->panelRoot . '/public/addon-manager/build';
         (new SourceProfile())->assertNoSymlinks($this->panelRoot, 'public/addon-manager/build');
+        Files::noLinks($source);
         if (!is_dir($source)) {
             throw new RuntimeException('The release is incomplete: prebuilt manager assets are missing.');
         }
@@ -135,10 +175,7 @@ final class Installer
             if (is_file($target) && hash_file('sha256', $target) === hash_file('sha256', $file->getPathname())) {
                 continue;
             }
-            $temporary = $target . '.tmp-' . bin2hex(random_bytes(6));
-            if (!copy($file->getPathname(), $temporary) || !chmod($temporary, 0644) || !rename($temporary, $target)) {
-                throw new RuntimeException('Cannot deploy manager asset: ' . $relative);
-            }
+            Files::atomic($target, Files::read($file->getPathname()), 0644);
             $copied[] = $relative;
         }
         return $copied;

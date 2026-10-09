@@ -7,6 +7,7 @@ namespace AddonManager\Laravel;
 use Illuminate\Database\Schema\Blueprint;
 use AddonManager\Core\ManifestValidator;
 use AddonManager\Core\Paths;
+use AddonManager\Storage\Files;
 use RuntimeException;
 use Throwable;
 
@@ -27,10 +28,14 @@ final class MigrationExecutor
                     throw new RuntimeException('Frozen package path is required for migration: ' . $id);
                 }
                 $source = Paths::destination($package, $migration['source']);
-                if (!is_file($source) || hash_file('sha256', $source) !== $migration['sha256']) {
+                if (!is_file($source)) {
                     throw new RuntimeException('Migration bytes changed: ' . $id . ':' . $migration['id']);
                 }
-                $document = json_decode((string) file_get_contents($source), true, 64, JSON_THROW_ON_ERROR);
+                $bytes = Files::read($source);
+                if (!hash_equals($migration['sha256'], hash('sha256', $bytes))) {
+                    throw new RuntimeException('Migration bytes changed: ' . $id . ':' . $migration['id']);
+                }
+                $document = json_decode($bytes, true, 64, JSON_THROW_ON_ERROR);
                 $this->validate($id, $document);
                 $applied[] = $this->runMigration($id, $migration, $document['operations'], $operation['id']);
             }
@@ -125,15 +130,25 @@ final class MigrationExecutor
         if ($record && $record->checksum !== $migration['sha256']) {
             throw new RuntimeException('A migration ID cannot change its checksum: ' . $id . ':' . $migration['id']);
         }
+        // Started and failed ledgers reserve their table names too: a failed DDL
+        // attempt may already have a filesystem receipt that a later retry uses.
+        // These durable records survive disabling and deleting addon code.
+        foreach ($steps as $step) {
+            if ($step['type'] === 'createTable') {
+                $this->assertTableClaim($step['table'], $id);
+            }
+        }
         if ($record && $record->status === 'complete') {
+            foreach ($steps as $step) {
+                $this->verifyCompletedStep($step);
+            }
             return ['addonId' => $id, 'migrationId' => $migration['id'], 'status' => 'already-applied'];
         }
         $journalRoot = $this->stateRoot . '/database-journals';
-        if (!is_dir($journalRoot) && !mkdir($journalRoot, 0700, true) && !is_dir($journalRoot)) {
-            throw new RuntimeException('Cannot create database recovery journal.');
-        }
+        Files::directory($journalRoot);
         $journalFile = $journalRoot . '/' . hash('sha256', $id . ':' . $migration['id']) . '.json';
-        $journal = is_file($journalFile) ? json_decode((string) file_get_contents($journalFile), true, 128, JSON_THROW_ON_ERROR) : ['addonId' => $id, 'migrationId' => $migration['id'], 'checksum' => $migration['sha256'], 'operationId' => $operationId, 'completedSteps' => [], 'ownedTables' => []];
+        Files::noLinks($journalFile);
+        $journal = is_file($journalFile) ? Files::json($journalFile) : ['addonId' => $id, 'migrationId' => $migration['id'], 'checksum' => $migration['sha256'], 'operationId' => $operationId, 'completedSteps' => [], 'ownedTables' => []];
         if ($journal['checksum'] !== $migration['sha256']) {
             throw new RuntimeException('Migration filesystem checksum conflicts with database ledger.');
         }
@@ -141,6 +156,7 @@ final class MigrationExecutor
         try {
             foreach ($steps as $index => $step) {
                 if (in_array($index, $journal['completedSteps'], true)) {
+                    $this->verifyCompletedStep($step);
                     continue;
                 }
                 $journal['pendingStep'] = $index;
@@ -231,6 +247,7 @@ final class MigrationExecutor
 
     private function assertOwnedTable(string $table, string $addonId, array $journal): void
     {
+        $this->assertTableClaim($table, $addonId);
         if (in_array($table, $journal['ownedTables'], true)) {
             return;
         }
@@ -246,6 +263,82 @@ final class MigrationExecutor
             }
         }
         throw new RuntimeException('Existing table is not owned by this exact addon migration ledger: ' . $addonId . ':' . $table);
+    }
+
+    private function assertTableClaim(string $table, string $addonId): void
+    {
+        $records = $this->connection->table('addon_manager_addon_migrations')->where('addon_id', '!=', $addonId)->get();
+        foreach ($records as $record) {
+            foreach (json_decode($record->operations, true, 128, JSON_THROW_ON_ERROR) as $index => $step) {
+                if (($step['type'] ?? null) === 'createTable' && ($step['table'] ?? null) === $table) {
+                    if ($this->rejectedBeforeTableClaim($record, $table, $index)) {
+                        continue;
+                    }
+                    throw new RuntimeException('Table name is reserved by another exact addon migration ledger: ' . $record->addon_id . ':' . $table);
+                }
+            }
+        }
+        // A restored database can lose ledger rows while the independent DDL
+        // journal still reserves an attempted table for its original addon.
+        $journalRoot = $this->stateRoot . '/database-journals';
+        Files::noLinks($journalRoot);
+        foreach (glob($journalRoot . '/*.json') ?: [] as $file) {
+            $journal = Files::json($file);
+            if (($journal['addonId'] ?? null) !== $addonId && in_array($table, $journal['ownedTables'] ?? [], true)) {
+                throw new RuntimeException('Table name is reserved by another exact addon migration journal: ' . ($journal['addonId'] ?? 'unknown') . ':' . $table);
+            }
+        }
+    }
+
+    private function rejectedBeforeTableClaim(object $record, string $table, int $index): bool
+    {
+        // Older releases retained planned operations even when another addon's
+        // existing table was explicitly rejected before ownership was recorded.
+        // A matching rejection in both ledgers proves this was never a claim.
+        $error = 'Refusing to adopt a pre-existing table: ' . $table;
+        if ($record->status !== 'needs-database-review' || $record->error !== $error) {
+            return false;
+        }
+        $file = $this->stateRoot . '/database-journals/' . hash('sha256', $record->addon_id . ':' . $record->migration_id) . '.json';
+        Files::noLinks($file);
+        if (!is_file($file)) return false;
+        $journal = Files::json($file);
+        return ($journal['addonId'] ?? null) === $record->addon_id
+            && ($journal['migrationId'] ?? null) === $record->migration_id
+            && ($journal['checksum'] ?? null) === $record->checksum
+            && ($journal['status'] ?? null) === 'needs-database-review'
+            && ($journal['error'] ?? null) === $error
+            && ($journal['pendingStep'] ?? null) === $index
+            && is_array($journal['ownedTables'] ?? null)
+            && !in_array($table, $journal['ownedTables'], true)
+            && is_array($journal['completedSteps'] ?? null)
+            && !in_array($index, $journal['completedSteps'], true);
+    }
+
+    private function verifyCompletedStep(array $step): void
+    {
+        $schema = $this->connection->getSchemaBuilder();
+        if (!$schema->hasTable($step['table'])) {
+            throw new RuntimeException('Previously completed migration table is missing; reconcile the database ledger and recovery journal: ' . $step['table']);
+        }
+        if ($step['type'] !== 'createIndex') {
+            foreach ($step['columns'] as $column) {
+                $this->assertColumn($step['table'], $column);
+            }
+            if (isset($step['primary'])) {
+                $primary = array_values(array_filter($schema->getIndexes($step['table']), static fn (array $index) => ($index['primary'] ?? false) === true));
+                if (count($primary) !== 1 || $primary[0]['columns'] !== $step['primary']) {
+                    throw new RuntimeException('Previously completed migration primary key conflicts with its declaration.');
+                }
+            }
+            return;
+        }
+        foreach ($schema->getIndexes($step['table']) as $index) {
+            if ($index['name'] === $step['name'] && $index['columns'] === $step['columns'] && (bool) $index['unique'] === (bool) ($step['unique'] ?? false)) {
+                return;
+            }
+        }
+        throw new RuntimeException('Previously completed migration index is missing or conflicts with its declaration: ' . $step['name']);
     }
 
     private function addColumn(Blueprint $table, array $column): mixed
@@ -267,6 +360,9 @@ final class MigrationExecutor
             }
             if (!in_array(strtolower($column['type_name']), $types[$declaration['type']], true) || (bool) $column['nullable'] !== (bool) ($declaration['nullable'] ?? false)) {
                 throw new RuntimeException('Existing column conflicts with additive declaration: ' . $table . '.' . $declaration['name']);
+            }
+            if (in_array($declaration['type'], ['integer', 'bigInteger', 'boolean'], true) && preg_match('/\bunsigned\b/i', $column['type'])) {
+                throw new RuntimeException('Existing unsigned column conflicts with signed additive declaration: ' . $table . '.' . $declaration['name']);
             }
             if ($declaration['type'] === 'string' && preg_match('/\((\d+)\)/', $column['type'], $length) && (int) $length[1] !== ($declaration['length'] ?? 255)) {
                 throw new RuntimeException('Existing string column length conflicts with declaration.');
@@ -300,26 +396,6 @@ final class MigrationExecutor
 
     private function writeJournal(string $file, array $journal): void
     {
-        $temporary = $file . '.' . bin2hex(random_bytes(6));
-        $bytes = json_encode($journal, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-        $handle = fopen($temporary, 'xb');
-        if (!$handle) {
-            throw new RuntimeException('Cannot write database recovery journal.');
-        }
-        try {
-            if (fwrite($handle, $bytes) !== strlen($bytes)) {
-                throw new RuntimeException('Incomplete database recovery journal write.');
-            }
-            fflush($handle);
-            if (function_exists('fsync')) {
-                fsync($handle);
-            }
-            chmod($temporary, 0600);
-        } finally {
-            fclose($handle);
-        }
-        if (!rename($temporary, $file)) {
-            throw new RuntimeException('Cannot activate database recovery journal.');
-        }
+        Files::writeJson($file, $journal);
     }
 }

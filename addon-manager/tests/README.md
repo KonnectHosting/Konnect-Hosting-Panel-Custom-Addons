@@ -5,6 +5,8 @@ Run from the Panel root with PHP 8.2+ and the ZIP extension:
 ```sh
 php addon-manager/tests/run.php
 php addon-manager/tests/run.php --group=lifecycle
+php addon-manager/tests/run.php --group=cli
+php addon-manager/tests/run.php --group=laravel-adapter
 php addon-manager/tests/run.php --filter='source drift'
 php addon-manager/tests/run.php --json=/tmp/addon-manager-test-results.json
 ```
@@ -27,6 +29,33 @@ and crash recovery.
 They complement Laravel authorization/CSRF, actual database migration, frontend
 build, and browser checks; the standalone suite does not claim to establish those
 behaviors.
+
+## Browser smoke
+
+Run the shipped admin markup and assets against a local simulated management API:
+
+```sh
+node addon-manager/tests/browser-smoke.cjs
+```
+
+This standalone harness requires Node.js 22+ and an installed Chromium executable;
+it needs no npm packages, Panel fixture, or external network. Chromium defaults to
+`/usr/bin/chromium`. Override the executable and report directory when needed:
+
+```sh
+CHROMIUM_BIN=/absolute/path/to/chromium \
+ADDON_MANAGER_BROWSER_OUTPUT=/tmp/addon-manager-browser-results \
+node addon-manager/tests/browser-smoke.cjs
+```
+
+The default output is a fresh temporary directory printed in the JSON report.
+It contains `results.json`, screenshots, and a Chromium profile. Checks cover
+dependency confirmations, safe text rendering, keyboard focus, responsive themes,
+administrator-scoped progress, exact request replay, two-factor/session failures,
+ambiguous validation failures, and stale asynchronous responses. Failed assertions
+exit nonzero. The simulated API checks client behavior; the separate Laravel suite
+checks actual middleware and database behavior. Browser fixtures and outputs are
+excluded from the manager release ZIP.
 
 The separate Laravel suite uses the actual Panel HTTP kernel and database from an
 installed disposable fixture with its locked Composer dependencies:

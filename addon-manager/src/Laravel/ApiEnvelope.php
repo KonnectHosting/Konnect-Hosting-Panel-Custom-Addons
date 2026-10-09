@@ -7,6 +7,7 @@ namespace AddonManager\Laravel;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 
@@ -20,6 +21,17 @@ final class ApiEnvelope
         try {
             $request->headers->set('Accept', 'application/json');
             $response = $next($request);
+            // The Panel's 2FA middleware redirects browser GET requests even
+            // when Accept requests JSON. Manager fetches omit Content-Type on
+            // GET, so translate that rejection into the same API contract.
+            if ($response->isRedirection()) {
+                $account = parse_url((string) $response->headers->get('Location'), PHP_URL_PATH) === '/account';
+                $message = $account
+                    ? 'Two-factor authentication is required on this account in order to access this endpoint.'
+                    : 'Authentication is required. Refresh the page and sign in again.';
+                $response->headers->remove('Location');
+                return $this->normalize($response, ['message' => $message], $account ? 400 : 401);
+            }
             if ($response->getStatusCode() < 400) {
                 return $response;
             }
@@ -41,14 +53,29 @@ final class ApiEnvelope
             if ($status === 422 && isset($body['errors'])) {
                 $envelope['errors'] = $body['errors'];
             }
-            return response()->json($envelope, $status);
+            return $this->normalize($response, $envelope, $status);
         } catch (ValidationException $e) {
             return response()->json(['message' => 'The request contains invalid fields.', 'errors' => $e->errors()], 422);
         } catch (HttpExceptionInterface $e) {
-            return response()->json(['message' => $e->getMessage() ?: 'The request was rejected.'], $e->getStatusCode());
+            $message = $e->getStatusCode() >= 500
+                ? 'The manager could not complete this request. Check its operation log or run the standalone doctor.'
+                : ($e->getMessage() ?: 'The request was rejected.');
+            if ($e->getStatusCode() >= 500) report($e);
+            return response()->json(['message' => $message], $e->getStatusCode(), $e->getHeaders());
         } catch (Throwable $e) {
             report($e);
             return response()->json(['message' => 'The manager could not complete this request. Check its operation log or run the standalone doctor.'], 500);
         }
+    }
+
+    private function normalize(Response $response, array $body, int $status): Response
+    {
+        // Retain session cookies and middleware headers when replacing an error
+        // body, including logout cookies issued by AuthenticateSession.
+        $response->setStatusCode($status);
+        $response->setContent(json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        $response->headers->set('Content-Type', 'application/json');
+        $response->headers->remove('Content-Length');
+        return $response;
     }
 }

@@ -2,8 +2,12 @@
 declare(strict_types=1);
 
 use AddonManager\Installer\BootstrapInstaller;
+use AddonManager\Installer\Installer;
 use AddonManager\Installer\SourceProfile;
-use function AddonManager\Tests\{check, phpCommand, rejects, same, temporary, write};
+use AddonManager\Laravel\HostAdapter;
+use AddonManager\Lifecycle\Manager;
+use AddonManager\Storage\Files;
+use function AddonManager\Tests\{check, host, phpCommand, rejects, same, temporary, write};
 
 $suite->test('bootstrap', 'standalone loader is repeatable and resolves neutral classes without Composer', function (): void {
     temporary(function (string $root): void {
@@ -13,7 +17,7 @@ require __BOOTSTRAP__;
 $loaders = count(spl_autoload_functions());
 require __BOOTSTRAP__;
 if (count(spl_autoload_functions()) !== $loaders) throw new RuntimeException('Repeated loading registered another loader');
-if (ADDON_MANAGER_VERSION !== '2.0.0') throw new RuntimeException('Unexpected manager release version');
+if (ADDON_MANAGER_VERSION !== '2.0.1') throw new RuntimeException('Unexpected manager release version');
 foreach ([AddonManager\Core\ManifestValidator::class, AddonManager\Installer\SourceProfile::class, AddonManager\Lifecycle\Manager::class, AddonManager\Runner\IsolatedRunner::class, AddonManager\Storage\Files::class] as $class) {
     $reflection = new ReflectionClass($class);
     if ($reflection->getName() !== $class || !str_starts_with($reflection->getFileName(), __SOURCE_ROOT__)) throw new RuntimeException('Loader resolved the wrong implementation: ' . $class);
@@ -129,4 +133,264 @@ $suite->test('bootstrap', 'retained legacy bootstrap cannot be normalized into a
     foreach (['bootstrap/app.php', 'resources/views/layouts/admin.blade.php'] as $relative) {
         rejects(static fn () => (new SourceProfile())->originalBytes($relative, $legacy), '/Legacy branded manager installation detected/i');
     }
+});
+
+function bootstrapFixture(string $root, array $profile): BootstrapInstaller
+{
+    foreach ($profile['fixtureSources'] as $relative => $source) write($root . '/panel/' . $relative, file_get_contents(dirname(__DIR__, 2) . '/' . $source));
+    return new BootstrapInstaller($root . '/panel', dirname(__DIR__), $root . '/state');
+}
+
+$suite->test('bootstrap', 'repair retains both original backups and failure recovery preserves existing registration', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        $installer = bootstrapFixture($root, $profiles[0]);
+        $original = Files::inventory($root . '/panel');
+        $first = $installer->apply();
+        $bootstrap = file_get_contents($root . '/panel/bootstrap/app.php');
+        $navigation = 'resources/views/layouts/admin.blade.php';
+        write($root . '/panel/' . $navigation, file_get_contents($first['backups'][$navigation]['backup']));
+        $repair = $installer->apply();
+        same([$navigation], $repair['changed']);
+        same(2, count(Files::json($root . '/state/installer-backups/registration.json')['files']), 'Repair discarded another original backup');
+        same([$navigation], $installer->restore($repair['changed'])['restored']);
+        same($bootstrap, file_get_contents($root . '/panel/bootstrap/app.php'), 'Repair rollback removed an existing registration');
+        same(['bootstrap/app.php'], $installer->restore()['restored']);
+        same($original, Files::inventory($root . '/panel'));
+    });
+});
+
+$suite->test('bootstrap', 'installer and recovery respect the same exclusive lock', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        $installer = bootstrapFixture($root, $profiles[0]);
+        $installer->apply();
+        $before = Files::inventory($root . '/panel');
+        $record = file_get_contents($root . '/state/installer-backups/registration.json');
+        $lock = Files::lock($root . '/state/installer-backups/install.lock');
+        try {
+            rejects(static fn () => $installer->apply(), '/installer.*recovery.*running/i');
+            rejects(static fn () => $installer->restore(), '/installer.*recovery.*running/i');
+        } finally { fclose($lock); }
+        same($before, Files::inventory($root . '/panel'));
+        same($record, file_get_contents($root . '/state/installer-backups/registration.json'));
+    });
+});
+
+foreach (['state', 'installer-backups', 'install.lock', 'registration.json', 'backup blob'] as $linkTarget) {
+    $suite->test('bootstrap', 'state symlink refuses installer and recovery: ' . $linkTarget, function () use ($profiles, $linkTarget): void {
+        temporary(function (string $root) use ($profiles, $linkTarget): void {
+            $installer = bootstrapFixture($root, $profiles[0]);
+            $first = $installer->apply();
+            $before = Files::inventory($root . '/panel');
+            $path = match ($linkTarget) {
+                'state' => $root . '/state',
+                'installer-backups' => $root . '/state/installer-backups',
+                'backup blob' => $first['backups']['bootstrap/app.php']['backup'],
+                default => $root . '/state/installer-backups/' . $linkTarget,
+            };
+            $outside = $root . '/preserved-' . str_replace(['.', ' '], '-', $linkTarget);
+            check(rename($path, $outside), 'Cannot move original recovery fixture');
+            check(symlink($outside, $path), 'Cannot prepare state symlink');
+            $outsideBefore = is_dir($outside) ? Files::inventory($outside) : file_get_contents($outside);
+            rejects(static fn () => $installer->apply(), '/symbolic|symlink/i');
+            rejects(static fn () => $installer->restore(), '/symbolic|symlink/i');
+            same($before, Files::inventory($root . '/panel'), 'Symlink rejection changed host source');
+            same($outsideBefore, is_dir($outside) ? Files::inventory($outside) : file_get_contents($outside), 'Symlink rejection changed its target');
+        });
+    });
+}
+
+$suite->test('bootstrap', 'modified original backup blocks repeat registration before writes', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        $installer = bootstrapFixture($root, $profiles[0]);
+        $first = $installer->apply();
+        $before = Files::inventory($root . '/panel');
+        write($first['backups']['bootstrap/app.php']['backup'], 'tampered recovery bytes');
+        rejects(static fn () => $installer->apply(), '/backup.*modified/i');
+        rejects(static fn () => $installer->restore(), '/unexpected bootstrap edits/i');
+        same($before, Files::inventory($root . '/panel'));
+    });
+});
+
+$suite->test('bootstrap', 'recovery validates every source before restoring the first registration', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        $installer = bootstrapFixture($root, $profiles[0]);
+        $installer->apply();
+        $path = $root . '/panel/resources/views/layouts/admin.blade.php';
+        write($path, file_get_contents($path) . "\nmanual changes\n");
+        $before = Files::inventory($root . '/panel');
+        rejects(static fn () => $installer->restore(), '/unexpected bootstrap edits/i');
+        same($before, Files::inventory($root . '/panel'));
+    });
+});
+
+$suite->test('bootstrap', 'exact registration bytes outside the supported anchor refuse detection', function () use ($profiles): void {
+    foreach (['bootstrap/app.php' => SourceProfile::BOOTSTRAP_BLOCK, 'resources/views/layouts/admin.blade.php' => SourceProfile::NAV_BLOCK] as $relative => $block) {
+        temporary(function (string $root) use ($profiles, $relative, $block): void {
+            $installer = bootstrapFixture($root, $profiles[0]);
+            write($root . '/panel/' . $relative, $block . file_get_contents($root . '/panel/' . $relative));
+            $before = Files::inventory($root . '/panel');
+            rejects(static fn () => $installer->apply(), '/supported anchor/i');
+            same($before, Files::inventory($root . '/panel'));
+            check(!is_dir($root . '/state'), 'Rejected registration created installer state');
+        });
+    }
+});
+
+$suite->test('bootstrap', 'CLI recovery rejects dry-run instead of silently changing registered files', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        bootstrapFixture($root, $profiles[0]);
+        (new BootstrapInstaller($root . '/panel', dirname(__DIR__)))->apply();
+        $before = Files::inventory($root . '/panel');
+        $result = phpCommand(dirname(__DIR__) . '/install.php', ['--panel-root=' . $root . '/panel', '--recover-bootstrap', '--dry-run']);
+        same(1, $result['exit']);
+        check(str_contains($result['stderr'], 'cannot be combined'), 'Conflicting recovery options lost their reason');
+        same($before, Files::inventory($root . '/panel'));
+    });
+});
+
+$suite->test('bootstrap', 'CLI host configuration requires a JSON object', function (): void {
+    temporary(function (string $root): void {
+        write($root . '/settings.json', '[]');
+        $result = phpCommand(dirname(__DIR__) . '/install.php', ['--panel-root=' . $root, '--config=' . $root . '/settings.json', '--dry-run']);
+        same(1, $result['exit']);
+        check(str_contains($result['stderr'], 'must be a JSON object'), 'Array host settings were not rejected at the CLI boundary');
+    });
+});
+
+$suite->test('bootstrap', 'full installation lock survives nested registration and recovery until completion', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        $installer = bootstrapFixture($root, $profiles[0]);
+        $original = Files::inventory($root . '/panel');
+        $other = new BootstrapInstaller($root . '/panel', dirname(__DIR__), $root . '/state');
+        $installer->synchronized(function () use ($installer, $other): void {
+            $first = $installer->apply();
+            same(2, count($first['changed']));
+            rejects(static fn () => $other->apply(), '/installer.*recovery.*running/i');
+            rejects(static fn () => $other->restore(), '/installer.*recovery.*running/i');
+            same(2, count($installer->restore($first['changed'])['restored']), 'Held lock deadlocked nested recovery');
+            same(2, count($installer->apply()['changed']), 'Held lock deadlocked nested registration');
+            rejects(static fn () => $other->apply(), '/installer.*recovery.*running/i');
+        });
+        same(2, count($other->restore()['restored']), 'Completed installation retained its lock');
+        same($original, Files::inventory($root . '/panel'));
+    });
+});
+
+$suite->test('bootstrap', 'retained source fingerprints validate composed bytes and reject linked baseline ancestors', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        bootstrapFixture($root, $profiles[0]);
+        $panel = $root . '/panel';
+        $baseline = Files::inventory($panel);
+        $id = hash('sha256', 'retained test snapshot');
+        $files = $panel . '/storage/app/addon-manager/baselines/' . $id . '/files';
+        Files::copyInventory($panel, $files, $baseline);
+        $target = 'resources/scripts/routers/routes.ts';
+        write($panel . '/' . $target, file_get_contents($panel . '/' . $target) . "\n// composed fixture source\n");
+        $active = $baseline;
+        $active[$target] = hash_file('sha256', $panel . '/' . $target);
+        Files::writeJson($panel . '/storage/app/addon-manager/registry.json', ['baselineId' => $id, 'baselineRoot' => $files, 'baselineInventory' => $baseline, 'activeInventory' => $active]);
+        same($profiles[0]['id'], (new SourceProfile())->detect($panel)['id'], 'Matched composed source lost its retained profile');
+        $before = Files::inventory($panel, ['storage']);
+        check(rename(dirname($files), $root . '/retained-baseline'), 'Cannot move retained snapshot');
+        check(symlink($root . '/retained-baseline', dirname($files)), 'Cannot link retained snapshot');
+        rejects(static fn () => (new SourceProfile())->detect($panel), '/symbolic|symlink/i');
+        same($before, Files::inventory($panel, ['storage']));
+    });
+});
+
+$suite->test('bootstrap', 'registered manager deployment lock serializes repair and recovery', function () use ($profiles): void {
+    temporary(function (string $root) use ($profiles): void {
+        $installer = bootstrapFixture($root, $profiles[0]);
+        $installer->apply();
+        Files::writeJson($root . '/state/registry.json', ['registeredFixture' => true]);
+        $before = Files::inventory($root . '/panel');
+        $deployment = Files::lock($root . '/state/deployment.lock');
+        try {
+            rejects(static fn () => $installer->apply(), '/manager deployment is running/i');
+            rejects(static fn () => $installer->restore(), '/manager deployment is running/i');
+        } finally { fclose($deployment); }
+        same($before, Files::inventory($root . '/panel'));
+        $installer->synchronized(function () use ($installer, $root): void {
+            same(null, Files::lock($root . '/state/deployment.lock', false), 'Installer released the deployment lock before completion');
+            same(2, count($installer->restore()['restored']), 'Deployment lock deadlocked nested recovery');
+            same(2, count($installer->apply()['changed']), 'Deployment lock deadlocked nested registration');
+        });
+        $released = Files::lock($root . '/state/deployment.lock', false);
+        check(is_resource($released), 'Installer leaked the deployment lock');
+        fclose($released);
+        $bootstrapLock = Files::lock($root . '/state/installer-backups/install.lock');
+        try { rejects(static fn () => $installer->apply(), '/installer.*recovery.*running/i'); }
+        finally { fclose($bootstrapLock); }
+        $released = Files::lock($root . '/state/deployment.lock', false);
+        check(is_resource($released), 'Busy bootstrap lock leaked the preceding deployment lock');
+        fclose($released);
+    });
+});
+
+/** Exercise retained state validation through the real host adapter without Laravel boot. */
+function bootstrapStateHost(string $panel, string $state): HostAdapter
+{
+    $application = new class($panel, $state) {
+        public function __construct(private readonly string $panel, private readonly string $state) {}
+        public function basePath(string $relative = ''): string { return $this->panel . ($relative === '' ? '' : '/' . $relative); }
+        public function storagePath(string $relative = ''): string { return $relative === 'app/addon-manager' ? $this->state : $this->panel . '/storage/' . $relative; }
+    };
+    return new HostAdapter($application, []);
+}
+
+$suite->test('bootstrap', 'fresh installer state checks do not create private state or capture a baseline', function (): void {
+    temporary(function (string $root): void {
+        write($root . '/panel/resources/views/base.blade.php', 'fresh source');
+        $state = $root . '/panel/storage/app/addon-manager';
+        $adapter = bootstrapStateHost($root . '/panel', $state);
+        $installer = new Installer($root . '/panel');
+        same(null, (new ReflectionMethod(Installer::class, 'existingStateChecks'))->invoke($installer, $adapter, []));
+        check(!is_dir($root . '/panel/storage'), 'Fresh preflight created private manager state');
+        same('fresh source', file_get_contents($root . '/panel/resources/views/base.blade.php'));
+    });
+});
+
+$suite->test('bootstrap', 'retained manager preflight blocks unmanaged source drift without modifying state', function (): void {
+    temporary(function (string $root): void {
+        $panel = $root . '/panel';
+        $state = $panel . '/storage/app/addon-manager';
+        write($panel . '/resources/views/base.blade.php', 'retained source');
+        (new Manager($panel, $state))->initialize(host());
+        $adapter = bootstrapStateHost($panel, $state);
+        $installer = new Installer($panel);
+        $check = new ReflectionMethod(Installer::class, 'existingStateChecks');
+        $healthy = $check->invoke($installer, $adapter, []);
+        same(true, $healthy['ok']);
+        same(false, $healthy['runner']['ready'], 'State verification should not require an isolated runner');
+        write($panel . '/resources/views/audit-unmanaged.blade.php', 'unmanaged source edit');
+        $before = Files::inventory($panel);
+        $failed = $check->invoke($installer, $adapter, []);
+        same(false, $failed['ok']);
+        $drift = array_values(array_filter($failed['checks'], static fn (array $row): bool => $row['name'] === 'source-drift'))[0];
+        same(false, $drift['ok']);
+        check(str_contains($drift['message'], 'audit-unmanaged.blade.php'), 'Preflight omitted the unmanaged source path');
+        same($before, Files::inventory($panel), 'Retained state preflight changed source or private state');
+    });
+});
+
+$suite->test('bootstrap', 'retained preflight accepts only the declared bootstrap repair while still detecting other drift', function (): void {
+    temporary(function (string $root): void {
+        $panel = $root . '/panel';
+        $state = $panel . '/storage/app/addon-manager';
+        $beforeBytes = "<?php\nreturn \$app;\n";
+        $afterBytes = "<?php\n" . SourceProfile::BOOTSTRAP_BLOCK . "return \$app;\n";
+        write($panel . '/bootstrap/app.php', $afterBytes);
+        (new Manager($panel, $state))->initialize(host());
+        write($panel . '/bootstrap/app.php', $beforeBytes);
+        $changes = ['bootstrap/app.php' => ['beforeSha256' => hash('sha256', $beforeBytes), 'afterSha256' => hash('sha256', $afterBytes), 'before' => $beforeBytes, 'after' => $afterBytes]];
+        $adapter = bootstrapStateHost($panel, $state);
+        $installer = new Installer($panel);
+        $check = new ReflectionMethod(Installer::class, 'existingStateChecks');
+        same(true, $check->invoke($installer, $adapter, $changes)['ok'], 'Known missing registration blocked a safe repair');
+        same($beforeBytes, file_get_contents($panel . '/bootstrap/app.php'), 'Prospective validation applied the repair');
+        write($panel . '/resources/views/unrelated.blade.php', 'unrelated drift');
+        $before = Files::inventory($panel);
+        same(false, $check->invoke($installer, $adapter, $changes)['ok'], 'Bootstrap repair concealed unrelated source drift');
+        same($before, Files::inventory($panel));
+    });
 });

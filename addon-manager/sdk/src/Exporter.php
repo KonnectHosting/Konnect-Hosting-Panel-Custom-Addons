@@ -6,6 +6,7 @@ namespace AddonManager\Sdk;
 
 use AddonManager\Core\ArchiveExtractor;
 use AddonManager\Core\PackageValidator;
+use AddonManager\Core\Paths;
 use AddonManager\Tools\ZipBuilder;
 use RuntimeException;
 
@@ -19,10 +20,7 @@ final class Exporter
     /** @return array{path:string,sha256:string,id:string,version:string} */
     public function export(string $packageRoot, string $output): array
     {
-        $root = realpath($packageRoot);
-        if ($root === false || !is_dir($root)) {
-            throw new RuntimeException('Package directory does not exist.');
-        }
+        $root = Paths::realDirectory($packageRoot);
         $manifest = $this->validate($root);
         $entries = self::files($root);
         $outputParent = realpath(dirname($output));

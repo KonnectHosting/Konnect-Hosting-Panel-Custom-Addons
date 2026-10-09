@@ -36,9 +36,11 @@ final class DatabaseBackup
         Files::directory($root);
         $file = $root . '/' . $operationId . '.sql';
         $metadata = $file . '.json';
+        Files::noLinks($file);
+        Files::noLinks($metadata);
         if (is_file($metadata)) {
             $record = Files::json($metadata);
-            if (is_file($file) && hash_file('sha256', $file) === $record['sha256']) {
+            if (($record['operationId'] ?? null) === $operationId && ($record['path'] ?? null) === $file && is_file($file) && hash_file('sha256', $file) === ($record['sha256'] ?? null)) {
                 return $record;
             }
             throw new RuntimeException('Existing database snapshot is missing or modified.');

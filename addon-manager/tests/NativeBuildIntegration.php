@@ -101,6 +101,14 @@ $suite->test('native-assets', 'oversized declared asset rejects without reading 
     });
 });
 
+$suite->test('native-assets', 'oversized manifest rejects before allocating or parsing its declared JSON payload', function (): void {
+    temporary(function (string $root): void {
+        $before = assetFixture($root);
+        $packet = assetPacket($root . '/job/output.assets', [['name' => 'manifest.json', 'size' => 2 * 1024 * 1024 + 1, 'bytes' => '']]);
+        rejectedAssetPacket($root, $packet, $before, '/manifest.*bounded.*limit/i');
+    });
+});
+
 $suite->test('native-assets', 'aggregate asset expansion budget rejects individually bounded records', function () use ($metadata): void {
     temporary(function (string $root) use ($metadata): void {
         $before = assetFixture($root);

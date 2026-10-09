@@ -12,7 +12,7 @@
     const terminalStatuses = new Set(['succeeded', 'failed', 'recovered']);
     const statusLabels = { queued: 'Queued', running: 'In progress', succeeded: 'Completed', failed: 'Failed', recovery_required: 'Recovery required', recovered: 'Recovered' };
     const phaseLabels = { queued: 'Waiting for the worker', download: 'Downloading package', downloading: 'Downloading package', package: 'Verifying package', validate: 'Verifying package', validating: 'Verifying package', validation: 'Validating the installation', verification: 'Verifying package', plan: 'Checking dependencies', planning: 'Checking dependencies', staging: 'Preparing installation', stage: 'Preparing installation', build: 'Building assets', building: 'Building assets', backup: 'Preparing recovery backups', maintenance: 'Panel maintenance', activate: 'Activating changes', activation: 'Activating changes', migration: 'Applying additive database changes', health: 'Checking Panel health', health_check: 'Checking Panel health', complete: 'Finished', completed: 'Finished', failed: 'Failed', recovery: 'Recovering files', recovered: 'Files recovered', rollback: 'Restoring files' };
-    const state = { addons: [], loaded: false, loading: false, pending: null, operation: null, modal: null, submitting: false, recovering: false, polling: false, pollTimer: null, retryCount: 0, storageWarning: false, previousFocus: null };
+    const state = { addons: [], loaded: false, registryAvailable: false, loading: false, reloadRequested: false, pending: null, operation: null, modal: null, dialogRevision: 0, submitting: false, recovering: false, polling: false, pollTimer: null, retryCount: 0, storageWarning: false, previousFocus: null, previousOverflow: '' };
 
     // Every package-controlled string is inserted as text, never as markup.
     function element(tag, className, value) {
@@ -51,13 +51,31 @@
         return state.submitting || Boolean(state.pending) || Boolean(state.operation && !terminalStatuses.has(state.operation.status));
     }
     function mutationAvailable() {
-        return state.loaded && !busy();
+        return state.loaded && state.registryAvailable && !state.loading && !busy();
+    }
+    function selectionIsCurrent(modal) {
+        if (!modal.addon) return true;
+        const current = state.addons.find((addon) => addon.id === modal.addon.id);
+        const signature = (addon) => [addon.id, addon.name, addon.version, addon.enabled, addon.packageDigest, addon.dependencies];
+        if (!current || JSON.stringify(signature(current)) !== JSON.stringify(signature(modal.addon))) return false;
+        if (modal.action !== 'disable' && modal.action !== 'delete') return true;
+        const signatures = (addons) => JSON.stringify(addons.map(signature).sort((a, b) => a[0].localeCompare(b[0])));
+        return signatures(dependents(current.id, modal.action !== 'delete')) === signatures(modal.affected);
     }
     function syncButtons() {
         byId('am-install').disabled = !mutationAvailable();
         byId('am-empty-install').disabled = !mutationAvailable();
         byId('am-refresh').disabled = state.loading;
         root.querySelectorAll('[data-mutation]').forEach((node) => { node.disabled = !mutationAvailable(); });
+        if (state.modal && state.modal.type === 'action') {
+            const current = selectionIsCurrent(state.modal);
+            const cascade = byId('am-cascade');
+            byId('am-dialog-submit').disabled = !mutationAvailable() || !current || Boolean(cascade && !cascade.checked);
+            if (!current) {
+                byId('am-dialog-error').textContent = 'Installed addons changed while this dialog was open. Close it and review the action again.';
+                byId('am-dialog-error').hidden = false;
+            }
+        }
     }
     function persistence() {
         try {
@@ -69,10 +87,20 @@
             }
         }
     }
-    function validGitHubUrl(value) {
+    function validGitHubUrl(value, packageRequired = true) {
         try {
+            if (typeof value !== 'string' || value.length > 2048) return false;
             const url = new URL(value);
-            return url.protocol === 'https:' && url.hostname === 'github.com' && !url.port && !url.username && !url.password && !url.hash && url.pathname.split('/').filter(Boolean).length >= 2;
+            if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.hash) return false;
+            // Previously submitted requests must keep their exact arguments on replay.
+            if (!packageRequired) return url.pathname.split('/').filter(Boolean).length >= 2;
+            if (url.href.includes('?') || url.href.includes('#')) return false;
+            const parts = url.pathname.replace(/^\/+|\/+$/g, '').split('/');
+            if (parts.length < 4 || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(parts[0]) || !/^[A-Za-z0-9_.-]{1,100}$/.test(parts[1]) || ['.', '..'].includes(parts[1])) return false;
+            if (parts[2] === 'tree') return parts.slice(3).every(Boolean);
+            if (parts[2] === 'commit') return parts.length === 4 && /^[a-fA-F0-9]{40}$/.test(parts[3]);
+            if (parts[2] === 'archive') return parts.slice(3).every(Boolean) && /\.zip$/.test(parts[parts.length - 1]);
+            return parts[2] === 'releases' && parts[3] === 'download' && parts.length === 6 && Boolean(parts[4]) && /\.zip$/i.test(parts[5]);
         } catch (_) { return false; }
     }
     function requestId() {
@@ -87,14 +115,14 @@
             state.operation = null;
             if (saved.pending && saved.pending.body) {
                 const body = saved.pending.body;
-                if (actions.has(body.action) && typeof body.requestId === 'string' && /^[a-zA-Z0-9-]{16,100}$/.test(body.requestId)
-                    && (!body.url || validGitHubUrl(body.url)) && (!body.addonId || typeof body.addonId === 'string')
+                if (actions.has(body.action) && typeof body.requestId === 'string' && /^[a-zA-Z0-9_-]{16,128}$/.test(body.requestId)
+                    && (!body.url || validGitHubUrl(body.url, false)) && (!body.addonId || typeof body.addonId === 'string')
                     && (body.expectedAffectedIds === undefined || (Array.isArray(body.expectedAffectedIds) && body.expectedAffectedIds.every((id) => typeof id === 'string')))) {
-                    state.pending = { body: { action: body.action, requestId: body.requestId, ...(body.addonId ? { addonId: body.addonId } : {}), ...(body.url ? { url: body.url } : {}), ...(typeof body.cascade === 'boolean' ? { cascade: body.cascade } : {}), ...(body.expectedAffectedIds ? { expectedAffectedIds: body.expectedAffectedIds } : {}) }, createdAt: saved.pending.createdAt };
+                    state.pending = { body: { action: body.action, requestId: body.requestId, ...(body.addonId ? { addonId: body.addonId } : {}), ...(body.url ? { url: body.url } : {}), ...(typeof body.cascade === 'boolean' ? { cascade: body.cascade } : {}), ...(body.expectedAffectedIds ? { expectedAffectedIds: body.expectedAffectedIds } : {}) }, createdAt: saved.pending.createdAt, ambiguous: true };
                 }
             }
-            if (typeof saved.operationId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(saved.operationId)) {
-                state.operation = { id: saved.operationId, status: statusLabels[saved.operationStatus] ? saved.operationStatus : 'queued', message: 'Reconnecting to the recorded operation…' };
+            if (typeof saved.operationId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(saved.operationId)) {
+                state.operation = { id: saved.operationId, status: 'queued', message: 'Reconnecting to the recorded operation…' };
                 // An acknowledged operation must never be submitted again.
                 state.pending = null;
             }
@@ -111,6 +139,7 @@
         return output;
     }
     function errorMessage(status, message) {
+        if (status === 400) return `${truncate(message, 1800) || 'The Panel blocked this request.'} Check your administrator session and two-factor authentication, then reload this page.`;
         if (status === 401 || status === 403) return 'Your administrator session is unavailable or access was denied. Sign in as a root administrator, then reload this page.';
         if (status === 419) return 'Your session has expired. Reload this page to renew it before submitting another change.';
         if (status === 429) return 'The manager is receiving too many requests. Wait a moment and try again.';
@@ -124,16 +153,17 @@
             const response = await fetch(`${apiBase}${path}`, {
                 method: options.body ? 'POST' : 'GET',
                 credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal,
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(options.body ? { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf } : {}) },
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(options.body ? { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Addon-Manager-Actor': root.dataset.actor || '' } : {}) },
                 ...(options.body ? { body: JSON.stringify(options.body) } : {})
             });
             let payload;
             try { payload = await response.json(); } catch (_) { payload = {}; }
+            if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = {};
             if (!response.ok) {
                 const error = new Error(errorMessage(response.status, payload.message));
                 error.status = response.status;
                 error.details = flattenErrors(payload.errors);
-                error.uncertain = response.status >= 500;
+                error.uncertain = response.status >= 500 || Boolean(options.body && ![400, 401, 403, 419, 422, 429].includes(response.status));
                 throw error;
             }
             if (!Object.prototype.hasOwnProperty.call(payload, 'data')) {
@@ -157,7 +187,7 @@
         return { ...record, manifest, id: textValue(record.id || manifest.id || key), name: textValue(record.name || manifest.name || record.id || key, 'Unnamed addon'), version: textValue(record.version || manifest.version, 'Unknown'), enabled: record.enabled === true, dependencies: Array.isArray(record.dependencies) ? record.dependencies : (Array.isArray(manifest.dependencies) ? manifest.dependencies : []) };
     }
     async function loadAddons() {
-        if (state.loading) return;
+        if (state.loading) { state.reloadRequested = true; return; }
         state.loading = true;
         syncButtons();
         try {
@@ -166,10 +196,12 @@
             if (!records || typeof records !== 'object') throw new Error('The manager returned an invalid addon registry.');
             state.addons = Object.entries(records).map(([key, record]) => normalizeAddon(record, key)).filter((addon) => addon && addon.id).sort((a, b) => a.name.localeCompare(b.name));
             state.loaded = true;
+            state.registryAvailable = true;
             byId('am-loading').hidden = true;
             if (!state.storageWarning) notice();
             renderAddons();
         } catch (error) {
+            state.registryAvailable = false;
             connection(false, 'Cannot reach the addon registry');
             notice(error.message);
             byId('am-loading').hidden = true;
@@ -179,7 +211,10 @@
                 byId('am-empty-copy').textContent = 'Use Refresh to reconnect. Existing operations remain recorded.';
                 byId('am-empty-install').hidden = true;
             }
-        } finally { state.loading = false; syncButtons(); }
+        } finally {
+            state.loading = false; syncButtons();
+            if (state.reloadRequested) { state.reloadRequested = false; loadAddons(); }
+        }
     }
     function dependents(addonId, enabledOnly = false) {
         const found = new Set();
@@ -261,6 +296,7 @@
     }
     function openDialog(title, description, modal, submitLabel = '') {
         if (byId('am-dialog').open) closeDialog();
+        state.dialogRevision++;
         state.modal = modal;
         state.previousFocus = document.activeElement;
         byId('am-dialog-title').textContent = title;
@@ -275,13 +311,15 @@
         const dialog = byId('am-dialog');
         if (typeof dialog.showModal === 'function') dialog.showModal();
         else { dialog.setAttribute('open', ''); dialog.setAttribute('aria-modal', 'true'); }
+        state.previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
     }
     function closeDialog() {
+        state.dialogRevision++;
         const dialog = byId('am-dialog');
         if (typeof dialog.close === 'function') dialog.close();
         else dialog.removeAttribute('open');
-        document.body.style.overflow = '';
+        document.body.style.overflow = state.previousOverflow;
         state.modal = null;
         if (state.previousFocus && state.previousFocus.isConnected) state.previousFocus.focus();
         else byId('am-refresh').focus();
@@ -331,7 +369,7 @@
                     checkboxLabel.append(checkbox, element('span', '', `Also ${action === 'delete' ? 'delete' : 'disable'} these ${affected.length} dependent ${affected.length === 1 ? 'addon' : 'addons'}.`));
                     body.append(checkboxLabel);
                     byId('am-dialog-submit').disabled = true;
-                    checkbox.addEventListener('change', () => { byId('am-dialog-submit').disabled = !checkbox.checked; });
+                    checkbox.addEventListener('change', syncButtons);
                 }
             } else {
                 const warnings = dependencyWarnings(addon);
@@ -341,6 +379,7 @@
             byId('am-dialog-cancel').focus();
         }
         body.append(element('p', 'am-field-help', 'The Panel may briefly enter maintenance while the worker activates changes.'));
+        syncButtons();
     }
     function detailGrid(entries) {
         const grid = element('dl', 'am-detail-grid');
@@ -431,7 +470,11 @@
         byId('am-dialog-cancel').focus();
     }
     async function fetchOperationDetails(id) {
-        try { openOperationDetails(await api(`/operations/${encodeURIComponent(id)}`)); }
+        const revision = state.dialogRevision;
+        try {
+            const operation = await api(`/operations/${encodeURIComponent(id)}`);
+            if (state.dialogRevision === revision) openOperationDetails(operation);
+        }
         catch (error) { notice(error.message); }
     }
     function scheduleReconnect() {
@@ -440,7 +483,7 @@
         state.pollTimer = setTimeout(() => state.pending ? recoverSubmission() : pollOperation(), delay);
     }
     function acceptOperation(operation) {
-        if (!operation || typeof operation.id !== 'string' || !statusLabels[operation.status]) {
+        if (!operation || typeof operation.id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(operation.id) || !Object.prototype.hasOwnProperty.call(statusLabels, operation.status)) {
             const error = new Error('The manager returned an incomplete operation response. Reconnecting with the same request ID.'); error.uncertain = true; throw error;
         }
         const previousStatus = state.operation && state.operation.status;
@@ -455,12 +498,15 @@
     async function recoverSubmission() {
         if (!state.pending || state.recovering) return;
         clearTimeout(state.pollTimer); state.recovering = true;
+        const wasAmbiguous = state.pending.ambiguous === true;
+        // Persist before sending: a tab can close before any response or catch handler runs.
+        state.pending.ambiguous = true; persistence();
         try { acceptOperation(await api('/operations', { body: state.pending.body })); }
         catch (error) {
-            if (error.uncertain || error.status === 429) {
+            if (error.uncertain || [400, 401, 403, 419, 429].includes(error.status) || (error.status === 422 && wasAmbiguous)) {
                 state.retryCount++; connection(false); byId('am-reconnect').hidden = false;
-                renderOperation(); byId('am-operation-message').textContent = error.message;
-                scheduleReconnect();
+                renderOperation(); byId('am-operation-message').textContent = error.status === 422 ? [error.message, ...(error.details || []), 'An earlier submission may already be recorded. This request remains saved; resolve the validation issue, then reconnect using the same request ID.'].join(' ') : error.message;
+                if (error.uncertain || error.status === 429) scheduleReconnect();
             } else {
                 state.pending = null; persistence(); notice([error.message, ...(error.details || [])].join(' ')); renderOperation(); syncButtons();
             }
@@ -468,26 +514,36 @@
     }
     async function pollOperation() {
         if (!state.operation || state.polling) return;
+        const requestedOperation = state.operation;
+        let superseded = false;
         clearTimeout(state.pollTimer); state.polling = true;
-        try { acceptOperation(await api(`/operations/${encodeURIComponent(state.operation.id)}`)); }
+        try {
+            const operation = await api(`/operations/${encodeURIComponent(requestedOperation.id)}`);
+            if (state.operation !== requestedOperation) { superseded = true; return; }
+            if (!operation || operation.id !== requestedOperation.id) {
+                const error = new Error('The Panel returned a different operation. Reconnecting to the recorded operation.'); error.uncertain = true; throw error;
+            }
+            acceptOperation(operation);
+        }
         catch (error) {
+            if (state.operation !== requestedOperation) { superseded = true; return; }
             state.retryCount++; connection(false); byId('am-reconnect').hidden = false;
             byId('am-operation-message').textContent = error.status === 404 ? 'This operation is no longer available. Check the installed addons and manager diagnostics before making another change. Save the operation ID below.' : error.message;
             if (!error.status || error.status >= 500 || error.status === 429) scheduleReconnect();
             // Access errors need a new session; never submit a replacement operation.
-        } finally { state.polling = false; }
+        } finally { state.polling = false; if (superseded) scheduleReconnect(); }
     }
     async function submitAction(event) {
         event.preventDefault();
         const modal = state.modal;
-        if (!modal || modal.type !== 'action' || !mutationAvailable()) return;
+        if (!modal || modal.type !== 'action' || !mutationAvailable() || !selectionIsCurrent(modal)) { syncButtons(); return; }
         const errorBox = byId('am-dialog-error'); errorBox.hidden = true;
         const body = { action: modal.action, requestId: requestId() };
         if (modal.addon) body.addonId = modal.addon.id;
         if (modal.action === 'install' || modal.action === 'update') {
             body.url = byId('am-package-url').value.trim();
             if (!validGitHubUrl(body.url)) {
-                errorBox.textContent = 'Use a public HTTPS github.com package URL without credentials, a custom port, or a URL fragment.'; errorBox.hidden = false; byId('am-package-url').focus(); return;
+                errorBox.textContent = 'Use a public HTTPS github.com release ZIP, tree folder, archive, or full commit URL without credentials, a custom port, a query, or a fragment.'; errorBox.hidden = false; byId('am-package-url').focus(); return;
             }
         }
         if ((modal.action === 'disable' || modal.action === 'delete') && modal.affected.length) {
@@ -500,6 +556,7 @@
         }
         state.submitting = true; state.operation = null; state.pending = { body, createdAt: new Date().toISOString() }; state.retryCount = 0;
         persistence(); closeDialog(); notice(state.storageWarning ? 'Keep this page open until the operation finishes; this browser cannot save progress.' : ''); renderOperation(); syncButtons();
+        byId('am-operation').focus();
         await recoverSubmission();
         state.submitting = false; syncButtons();
     }
@@ -544,8 +601,10 @@
     }
     async function checkDoctor() {
         const node = byId('am-doctor'); node.disabled = true;
+        const revision = state.dialogRevision;
         try {
             const data = await api('/doctor');
+            if (state.dialogRevision !== revision) return;
             openDialog('Manager health', 'Read-only checks of the registry and manager environment.', { type: 'doctor' });
             const body = byId('am-dialog-body');
             if (data && typeof data === 'object') {

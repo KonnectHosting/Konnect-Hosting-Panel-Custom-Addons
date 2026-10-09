@@ -14,6 +14,9 @@ final class Composer
 {
     public function compose(string $baselineRoot, array $baselineInventory, string $stageRoot, array $addons, array $order, array $owners = [], string $defaultOwner = 'baseline'): array
     {
+        if (Files::inventory($baselineRoot) !== $baselineInventory) {
+            throw new RuntimeException('Protected baseline contains missing, changed, or unexpected source files.');
+        }
         Files::copyInventory($baselineRoot, $stageRoot, $baselineInventory);
         $inventory = $baselineInventory;
         $fileOwners = [];
