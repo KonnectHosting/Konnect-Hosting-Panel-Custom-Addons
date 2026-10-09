@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arix Pterodactyl Theme Installation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .container {
+      max-width: 600px;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    h3 {
+      color: #333;
+      margin-top:0;
+    }
+
+    p {
+      color: #666;
+      margin-bottom:0;
+    }
+
+    a {
+      color: #007bff;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+    pre {
+    	white-space: normal;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h3>Thank you for choosing the Arix Pterodactyl Theme.</h3>
+  <p>To initiate the installation of the Arix Pterodactyl Theme, ensure that you have installed all the necessary assets: <a href="https://pterodactyl.io/community/customization/panel.html" target="_blank">pterodactyl.io/community/customization/panel.html</a>.</p>
+  <p>Create an account at <a href="https://arix.gg" target="_blank">arix.gg</a>
+  <br/>Link your BuiltByBit to your Arix account.</p>
+  <p>Add your license key to your .env file:</p>
+  <pre><code>ARIX_LICENSE_KEY=your_license_key_here</code></pre>
+  
+  <p>Simply drag and drop the files into your Pterodactyl folder.</p>
+
+  <p>Once the files are uploaded, execute the following:</p>
+  <pre><code>php artisan arix</code></pre>
+
+  <p>In case you're experiencing an error during the installation process, try the following step:</p>
+  <pre><code>php artisan migrate --force &amp;&amp; php artisan optimize:clear &amp;&amp; php artisan optimize &amp;&amp; chmod -R 755 storage/* bootstrap/cache</code></pre>
+
+  <p>For any queries or assistance, feel free to join our Discord community: <a href="https://discord.gg/geCjrRbAwC" target="_blank">https://discord.gg/geCjrRbAwC</a></p>
+
+  <p>If you require more detailed information, please consult our documentation: <a href="https://arix.gg/docs" target="_blank">https://arix.gg/docs</a></p>
+</div>
+
+</body>
+</html>

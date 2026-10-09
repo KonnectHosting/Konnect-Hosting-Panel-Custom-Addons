@@ -1,0 +1,95 @@
+.drop {
+    @apply active:translate-y-0.5;
+}
+.shrink {
+    @apply active:scale-[0.97];
+}
+.outline {
+    @apply focus:ring-[1px] focus:ring-offset-2 focus:ring-offset-gray-700;
+}
+
+.button {
+    @apply px-4 py-2 inline-flex items-center justify-center whitespace-nowrap;
+    @apply rounded-component text-base font-medium transition-all duration-100;
+
+    /* Sizing Controls */
+    &.small {
+        @apply px-3 py-0 h-8 font-normal text-sm;
+    }
+
+    &.large {
+        @apply px-5 py-3;
+    }
+
+    &.secondary {
+        @apply text-gray-50 bg-transparent;
+
+        &:disabled {
+            background: transparent !important;
+        }
+    }
+
+    &:disabled {
+        @apply cursor-not-allowed;
+    }
+
+    &.square {
+        @apply p-0 w-12 h-12;
+
+        &.small {
+            @apply w-8 h-8;
+        }
+    }
+}
+
+.primary {
+    @apply bg-arix text-white/70;
+    @apply hover:text-white active:text-white hover:opacity-90 active:opacity-90 focus:ring-arix;
+
+    &.secondary {
+        @apply hover:bg-arix active:opacity-90 active:text-white;
+    }
+
+    &:disabled {
+        @apply opacity-50;
+    }
+}
+
+.text {
+    @apply bg-secondary-200 text-secondary-50 border-secondary-100 border-[1px];
+    @apply hover:text-secondary-50 active:text-secondary-50 hover:bg-secondary-100 active:bg-secondary-100 focus:ring-secondary-100;
+
+    &.secondary {
+        @apply hover:bg-secondary-200 active:bg-secondary-100;
+    }
+
+    &:disabled {
+        @apply opacity-50;
+    }
+}
+
+.danger {
+    @apply bg-danger-200 text-danger-50 border-danger-100 border-[1px];
+    @apply hover:text-danger-50 active:text-danger-50 hover:bg-danger-100 active:bg-danger-100 focus:ring-danger-100;
+
+    &.secondary {
+        @apply hover:bg-danger-200 active:bg-danger-100;
+    }
+
+    &:disabled {
+        @apply opacity-50;
+    }
+}
+
+.success {
+    @apply bg-success-200 text-success-50 border-success-100 border-[1px];
+    @apply hover:text-success-50 active:text-success-50 hover:bg-success-100 active:bg-success-100 focus:ring-success-100;
+
+    &.secondary {
+        @apply hover:bg-success-200 active:bg-success-100;
+    }
+
+    &:disabled {
+        @apply opacity-50;
+    }
+}

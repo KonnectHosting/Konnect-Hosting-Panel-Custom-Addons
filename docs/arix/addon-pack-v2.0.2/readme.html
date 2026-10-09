@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arix Pterodactyl Theme Installation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .container {
+      max-width: 600px;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+    }
+
+    h3 {
+      color: #333;
+      margin-top:0;
+    }
+
+    p {
+      color: #666;
+      margin-bottom:0;
+    }
+
+    a {
+      color: #007bff;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+    pre, span {
+      display: inline-block;
+      background-color: rgb(38, 38, 43);
+      color: #e6e9ff;
+      border-radius: 5px;
+      padding: 5px 7px;
+    	white-space: normal;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h3>Thank you for choosing the Arix Addon Pack for Pterodactyl.</h3>
+  <p>To install the Arix Addon Pack, you must first request a license on <a href="https://arix.gg/" target="_blank">our website</a>. Each purchase includes a single license, which cannot be shared.</p>
+  
+  <p>Once you've obtained your license key, add it to your <span>.env</span> file, replace <span>&lt;license_key&gt;</span> with your key:</p>
+
+  <pre style="display:block;padding:15px 20px;"><code>
+    PLUGINS_ADDON_LICENSE_KEY=&lt;license_key&gt;
+  </code></pre>
+
+  <p>To edit your <span>.env</span> file, use the following command:</pre>
+  <pre><code>
+    nano .env
+  </code></pre>
+
+  <p>
+    Simply drag and drop the files into your Pterodactyl folder.
+    <pre><code>
+      php artisan addons
+    </code></pre>
+  </p>
+  
+  <p>In case you're experiencing an error during the installation process, try the following step:</p>
+  <pre><code>php artisan migrate --force &amp;&amp; php artisan optimize:clear &amp;&amp; php artisan optimize &amp;&amp; chmod -R 755 storage/* bootstrap/cache</code></pre>
+
+  <p>For any queries or assistance, feel free to join our Discord community: <a href="https://discord.gg/geCjrRbAwC" target="_blank">https://discord.gg/geCjrRbAwC</a></p>
+
+  <p>If you require more detailed information, please consult our documentation: <a href="https://arix.gg/docs" target="_blank">https://arix.gg/docs</a></p>
+</div>
+
+</body>
+</html>

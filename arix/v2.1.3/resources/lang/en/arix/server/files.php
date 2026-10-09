@@ -1,0 +1,96 @@
+<?php
+
+return [
+    'file-manager' => 'File Manager',
+    'search' => 'Search',
+    'delete' => 'Delete',
+    'move' => 'Move',
+    'archive' => 'Archive',
+    'unarchive' => 'Unarchive',
+    'create-directory' => 'Create Directory',
+    'upload' => 'Upload',
+    'new-file' => 'New file',
+    'rename' => 'Rename',
+    'permissions' => 'Permissions',
+    'copy' => 'Copy',
+    'download' => 'Download',
+    'update' => 'Update',
+
+    'file-mode' => 'File Mode',
+    'you-cant-recover' => 'You will not be able to recover the contents of',
+    'once-deleted' => 'once deleted.',
+    'delete-files' => 'Delete Files',
+    'are-you-sure' => 'Are you sure you want to delete',
+    'this-is-permanent-action' => 'This is a permanent action and the files cannot be recovered.',
+    'name' => 'name',
+    'size' => 'size',
+    'date' => 'date',
+    'home' => 'home',
+    'container' => 'container',
+    'is-empty' => 'This directory seems to be empty.',
+    'is-limited' => 'This directory is too large to display in the browser, limiting the output to the first 250 files.',
+    'are-upload-click-to-view' => 'files are uploading, click to view',
+    'cancel-uploads' => 'Cancel Uploads',
+    'cancel' => 'Cancel',
+    'close' => 'Close',
+    'create' => 'Create',
+    'file-name' => 'File Name',
+    'file-name-description' => 'Enter the name that this file should be saved as.',
+    'directory-will-be-as' => 'This directory will be created as',
+    'rename-description' => 'Enter the new name and directory of this file or folder, relative to the current directory.',
+    'new-location' => 'New location',
+    'drag-and-drop' => 'Drag and drop files to upload.',
+    'folders-not-supported' => 'Folder uploads are not supported at this time.',
+    'upload-files' => 'Upload Files',
+    'folder-too-big' => 'Folder size exceeds 10MB limit. Please select a smaller folder.',
+    'upload-folders' => 'Upload Folders',
+    'upload-from-url' => 'Upload from URL',
+    'filename' => 'Filename',
+
+    'edit' => [
+        'youre-editing' => 'You\'re editing a',
+        'will-be-exluded' => 'file. Any files or directories listed in here will be excluded from backups. Wildcards are supported by using an asterisk',
+        'you-can-negate' => 'You can negate a prior rule by prepending an exclamation point',
+        'save-content' => 'Save Content',
+        'create-file' => 'Create File',
+    ],
+
+    'open-code-editor' => 'Open Code Editor',
+
+    'code-editor' => [
+        'explorer' => 'Explorer',
+        'reload' => 'Reload',
+        'new' => 'New',
+        'browse-files' => 'Browse Files',
+        'save' => 'Save',
+        'save-dirty' => 'Save *',
+        'saving' => 'Saving...',
+        'no-file-selected' => 'No file selected',
+        'no-files-found' => 'No files found',
+        'loading' => 'Loading...',
+
+        'file-be-created' => 'This file will be created as',
+    ],
+
+    'trashbin' => [
+        'title' => 'Trashbin',
+        'description' => 'View and manage files in the trashbin.',
+
+        'is-empty' => 'The trashbin is empty.',
+
+        'will-be-deleted' => 'Items in the trash are permanently deleted after {{days}} days.',
+        'select-all' => 'Select All',
+        'selected' => 'Selected',
+
+        'original-path' => 'Original Path',
+        'item' => 'item',
+        'items' => 'items',
+
+        'deleted-at' => 'Deleted At',
+        'restore' => 'Restore',
+        'delete' => 'Delete',
+        'confirm-delete' => 'Confirm Delete',
+
+        'delete-permanently' => 'Delete Permanently',
+    ]
+];

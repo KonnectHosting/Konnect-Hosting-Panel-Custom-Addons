@@ -1,0 +1,16 @@
+.manager_actions {
+    @apply flex gap-4 px-6 flex-wrap md:mb-0 mb-4 md:justify-end justify-between;
+}
+
+.file_row {
+    @apply flex items-center cursor-pointer mb-px text-sm no-underline px-6 border-t border-gray-600;
+    @apply hover:text-neutral-100 hover:bg-neutral-600;
+
+    & > .details {
+        @apply py-4 flex flex-1 items-center text-neutral-300 no-underline overflow-hidden truncate;
+
+        &:not(a) {
+            @apply cursor-default;
+        }
+    }
+}
