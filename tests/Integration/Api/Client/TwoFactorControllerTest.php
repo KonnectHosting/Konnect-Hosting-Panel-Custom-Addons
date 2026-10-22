@@ -43,12 +43,15 @@ class TwoFactorControllerTest extends ClientApiIntegrationTestCase
     {
         /** @var User $user */
         $user = User::factory()->create(['use_totp' => true]);
+        $before = $user->getRawOriginal();
+        config()->set('pterodactyl.auth.2fa.issuer', 'Konnect Hosting Panel');
 
         $response = $this->actingAs($user)->getJson('/api/client/account/two-factor');
 
         $response->assertStatus(Response::HTTP_BAD_REQUEST);
         $response->assertJsonPath('errors.0.code', 'BadRequestHttpException');
         $response->assertJsonPath('errors.0.detail', 'Two-factor authentication is already enabled on this account.');
+        $this->assertSame($before, $user->refresh()->getRawOriginal());
     }
 
     /**

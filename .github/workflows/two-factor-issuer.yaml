@@ -1,0 +1,31 @@
+name: Two-factor issuer
+
+on:
+  pull_request:
+    paths:
+      - 'app/Services/Users/TwoFactorSetupService.php'
+      - 'config/pterodactyl.php'
+      - 'tests/Unit/Services/Users/TwoFactorSetupServiceTest.php'
+      - '.github/workflows/two-factor-issuer.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_mysql, zip
+          tools: composer:v2
+          coverage: none
+      - run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
+      - run: php -l app/Services/Users/TwoFactorSetupService.php
+      - run: php -l config/pterodactyl.php
+      - run: vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php tests/Unit/Services/Users/TwoFactorSetupServiceTest.php

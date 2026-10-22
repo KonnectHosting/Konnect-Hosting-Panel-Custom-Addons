@@ -44,7 +44,10 @@ class TwoFactorSetupService
             'totp_secret' => $this->encrypter->encrypt($secret),
         ]);
 
-        $company = urlencode(preg_replace('/\s/', '', $this->config->get('app.name')));
+        $company = $this->config->get('pterodactyl.auth.2fa.issuer');
+        if (!is_string($company) || trim($company) === '') {
+            $company = $this->config->get('app.name');
+        }
 
         return [
             'image_url_data' => sprintf(

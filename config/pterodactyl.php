@@ -38,6 +38,8 @@ return [
     'auth' => [
         '2fa_required' => env('APP_2FA_REQUIRED', 0),
         '2fa' => [
+            // Null or blank uses the application name at enrollment time.
+            'issuer' => env('APP_2FA_ISSUER'),
             'bytes' => 32,
             'window' => env('APP_2FA_WINDOW', 4),
             'verify_newer' => true,
