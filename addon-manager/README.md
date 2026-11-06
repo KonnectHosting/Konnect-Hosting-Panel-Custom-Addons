@@ -44,8 +44,10 @@ the page polls its persisted result. A working rootless Docker validation runner
 is required to activate addon PHP or run native Panel builds. The manager's
 prebuilt page itself does not require a Panel frontend rebuild.
 
-Addon authors can start with [the developer guide](docs/DEVELOPER.md) and the
-three [SDK examples](sdk/README.md). Validate and export a self-contained package:
+Addon authors can start with the [authoring quick start](docs/ADDON-AUTHORING.md),
+the [copy-and-paste brief for coding chats](docs/AI-ADDON-BRIEF.md), the
+[developer reference](docs/DEVELOPER.md), and the three [SDK examples](sdk/README.md).
+Validate and export a self-contained package:
 
 ```sh
 php addon-manager/sdk/bin/addon.php validate addon-manager/sdk/examples/basic-admin-page

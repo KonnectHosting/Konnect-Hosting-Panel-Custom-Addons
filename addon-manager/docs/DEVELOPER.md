@@ -1,5 +1,9 @@
 # Developing an addon
 
+For a first package, use the [authoring quick start](ADDON-AUTHORING.md).
+To commission work in another coding chat, copy the
+[addon development brief](AI-ADDON-BRIEF.md).
+
 Manifest version 1 packages are folders containing `manifest.json` and explicitly declared
 payload bytes. They are data contracts, with no install/uninstall shell scripts,
 arbitrary SQL, executable migrations or package-manager hooks. Addon PHP that
@@ -214,9 +218,10 @@ by `_`, for example `example_demo_settings`. Columns use `name`, `type` and
 optional `nullable`, `default`, `length`; supported types are `string`, `text`,
 `integer`, `bigInteger`, `boolean`, `timestamp` and `json`. `createTable` may
 declare `primary`; `createIndex` includes `name`, `columns` and optional
-`unique: false`. A unique index is allowed only on a table created earlier in
-the same migration. Unique indexes on existing tables are rejected because a
-new constraint could break writes from code restored during rollback.
+`unique: false`. The 2.0.1 package validator rejects every `unique: true` index,
+including one on a table created in the same migration. A new `createTable`
+declaration may include a primary key. Do not infer package support from a
+lower-level database executor accepting a broader operation.
 The executor validates source checksums and immutable migration IDs.
 Defaults must match boolean, integer or string column types; `null` is allowed
 only for nullable columns. Text, timestamp and JSON defaults are unsupported.

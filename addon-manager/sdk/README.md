@@ -1,5 +1,8 @@
 # Addon SDK
 
+Start with the [authoring quick start](../docs/ADDON-AUTHORING.md) or give another
+coding chat the [copy-and-paste brief](../docs/AI-ADDON-BRIEF.md).
+
 The SDK CLI reuses the manager's `Core\PackageValidator` and `ArchiveExtractor`.
 It needs PHP 8.2+ and ext-zip, with no Composer or Laravel dependencies. Keep the
 SDK with the matching manager version; its bootstrap and core services are part
