@@ -11,7 +11,7 @@ final class Enabled
     public function handle(Request $request, \Closure $next): mixed
     {
         $manifest = app(ExtensionRegistry::class)->enabled()['gmod.toolkit'] ?? null;
-        abort_unless(($manifest['version'] ?? null) === '1.0.0', 404);
+        abort_unless(($manifest['version'] ?? null) === '1.1.0', 404);
         return $next($request);
     }
 }

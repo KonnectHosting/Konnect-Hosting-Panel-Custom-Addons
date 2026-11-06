@@ -9,7 +9,7 @@ use RuntimeException;
 
 final class ToolkitController
 {
-    public function __construct(private Access $access, private State $state, private WingsFiles $files, private Workshop $workshop, private NodeClient $node) {}
+    public function __construct(private Access $access, private State $state, private WingsFiles $files, private Workshop $workshop, private Fastdl $fastdl) {}
 
     private function reply(callable $callback): mixed
     {
@@ -22,8 +22,7 @@ final class ToolkitController
     {
         $this->access->check($request, $server);
         return $this->reply(function () use ($request, $server) {
-            try { $fastdl = $this->node->call($server, $request->user()->id, 'info'); }
-            catch (\Throwable $error) { $fastdl = ['message' => 'FastDL publisher is not reachable or not provisioned on this node.']; }
+            $fastdl = $this->fastdl->info($server, $request->user()->id);
             return ['fastdl' => $fastdl, 'backups' => array_map(static fn ($entry) => ['id' => $entry['id'], 'created' => $entry['created']], $this->state->backups($server->uuid)),
                 'target' => WingsFiles::LUA, 'mounting' => 'Server mounting uses +host_workshop_collection COLLECTION_ID in the egg startup. It is independent of resource.AddWorkshop client downloads. Configure any Steam API key privately in the egg, never in this Lua or FastDL.'];
         });
@@ -78,6 +77,11 @@ final class ToolkitController
         abort_unless(in_array($action, ['preview', 'publish', 'rotate', 'revoke'], true), 404);
         $this->access->check($request, $server, $action !== 'preview');
         $data = $request->validate(['preview' => ($action === 'publish' ? 'required|' : 'sometimes|') . 'string|regex:/^[a-f0-9]{64}$/']);
-        return $this->reply(fn () => $this->node->call($server, $request->user()->id, $action, $data));
+        return $this->reply(fn () => match ($action) {
+            'preview' => $this->fastdl->preview($server, $request->user()->id),
+            'publish' => $this->fastdl->publish($server, $request->user()->id, $data['preview']),
+            'rotate' => $this->fastdl->rotate($server, false),
+            'revoke' => $this->fastdl->rotate($server, true),
+        });
     }
 }

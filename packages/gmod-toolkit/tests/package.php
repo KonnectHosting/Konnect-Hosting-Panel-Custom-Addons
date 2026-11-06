@@ -17,6 +17,8 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
         $panel = $root . '/panel';
         foreach ($manifest['patches'] as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];
+            if (!is_file($source)) { $source = $repo . '/arix/v2.1.3/' . $patch['target']; }
+            if (!is_file($source)) { $source = $repo . '/' . $patch['target']; }
             write($panel . '/' . $patch['target'], file_get_contents($source));
         }
         // Unit lifecycle adapters only. Actual frontend compilation is exercised
@@ -40,17 +42,19 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
         foreach ($manifest['files'] as $file) { check(is_file($panel . '/' . $file['target']), 'Payload missing after installation.'); }
         $update = $root . '/update';
         Files::copyInventory($package, $update, Files::inventory($package));
-        $next = $manifest; $next['version'] = '1.0.1';
-        $enabled = str_replace("'1.0.0'", "'1.0.1'", file_get_contents($update . '/payload/Enabled.php'));
+        $next = $manifest; $next['version'] = '1.1.1';
+        $enabled = str_replace("'1.1.0'", "'1.1.1'", file_get_contents($update . '/payload/Enabled.php'));
         write($update . '/payload/Enabled.php', $enabled);
         foreach ($next['files'] as &$file) { if ($file['source'] === 'payload/Enabled.php') { $file['sha256'] = hash('sha256', $enabled); } }
         unset($file);
         write($update . '/manifest.json', json_encode($next));
         operation($fixture, 'update', ['addonId' => 'gmod.toolkit', 'packageRoot' => $update]);
-        same('1.0.1', $manager->registry()['addons']['gmod.toolkit']['version']);
+        same('1.1.1', $manager->registry()['addons']['gmod.toolkit']['version']);
         operation($fixture, 'disable', ['addonId' => 'gmod.toolkit']);
         foreach ($manifest['patches'] as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];
+            if (!is_file($source)) { $source = $repo . '/arix/v2.1.3/' . $patch['target']; }
+            if (!is_file($source)) { $source = $repo . '/' . $patch['target']; }
             same(file_get_contents($source), file_get_contents($panel . '/' . $patch['target']));
         }
         foreach ($manifest['files'] as $file) { check(!file_exists($panel . '/' . $file['target']), 'Payload survived disable.'); }

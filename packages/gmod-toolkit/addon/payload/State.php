@@ -69,4 +69,52 @@ final class State
     {
         return $this->read('backups-' . $uuid)['entries'] ?? [];
     }
+
+    public function remove(string $key): void
+    {
+        $path = $this->path($key);
+        if (is_file($path) && !unlink($path)) { throw new RuntimeException('Cannot remove private state.'); }
+    }
+
+    public function keys(string $prefix): array
+    {
+        if (!preg_match('/^[a-z0-9-]+$/D', $prefix)) { throw new RuntimeException('Invalid state prefix.'); }
+        $keys = [];
+        foreach (new \DirectoryIterator($this->root) as $entry) {
+            $name = $entry->getFilename();
+            if ($entry->isFile() && !$entry->isLink() && str_starts_with($name, $prefix) && str_ends_with($name, '.json')) {
+                $keys[] = substr($name, 0, -5);
+                if (count($keys) >= 10000) { break; }
+            }
+        }
+        return $keys;
+    }
+
+    public function directory(string $key): string
+    {
+        $path = substr($this->path($key), 0, -5);
+        if (is_link($path) || (file_exists($path) && !is_dir($path))) { throw new RuntimeException('Unsafe snapshot directory.'); }
+        if (!is_dir($path) && !mkdir($path, 0700)) { throw new RuntimeException('Cannot create private snapshot.'); }
+        chmod($path, 0700);
+        return $path;
+    }
+
+    public function object(string $key, string $name): string
+    {
+        if (!preg_match('/^[a-f0-9]{64}(?:\.bz2|\.part)?$/D', $name)) { throw new RuntimeException('Invalid snapshot object.'); }
+        $path = $this->directory($key) . '/' . $name;
+        if (is_link($path)) { throw new RuntimeException('Unsafe snapshot object.'); }
+        return $path;
+    }
+
+    public function removeDirectory(string $key): void
+    {
+        $path = $this->directory($key);
+        foreach (new \DirectoryIterator($path) as $entry) {
+            if ($entry->isDot()) { continue; }
+            if (!$entry->isFile() || $entry->isLink()) { throw new RuntimeException('Unexpected snapshot entry.'); }
+            unlink($entry->getPathname());
+        }
+        rmdir($path);
+    }
 }

@@ -9,7 +9,8 @@ interface Fastdl {
     url?: string;
     files?: number;
     message?: string;
-    job?: { status: string; message: string; completed: number; total: number };
+    preview?: DownloadPreview;
+    job?: { status: string; phase: string; message: string; completed: number; total: number };
 }
 interface Status {
     fastdl: Fastdl;
@@ -67,7 +68,7 @@ export default () => {
                 const { data } = await http.get<Status>(base);
                 if (!disposed) {
                     setStatus(data);
-                    setError('');
+                    setDownload(data.fastdl.preview);
                 }
             } catch (err) {
                 if (!disposed) setError(errorMessage(err));
@@ -76,7 +77,7 @@ export default () => {
             }
         };
         load();
-        const timer = window.setInterval(load, 10000);
+        const timer = window.setInterval(load, 3000);
         return () => {
             disposed = true;
             window.clearInterval(timer);
@@ -95,7 +96,11 @@ export default () => {
             setBusy(false);
         }
     };
-    const refresh = async () => setStatus((await http.get<Status>(base)).data);
+    const refresh = async () => {
+        const { data } = await http.get<Status>(base);
+        setStatus(data);
+        setDownload(data.fastdl.preview);
+    };
     const downloadAction = (action: string) =>
         run(async () => {
             await http.post(`${base}/fastdl/${action}`);
@@ -259,11 +264,11 @@ export default () => {
                 </Can>
             </section>
             <section className={box}>
-                <h2 className={'text-xl mb-2'}>FastDL on this server&apos;s node</h2>
+                <h2 className={'text-xl mb-2'}>FastDL</h2>
                 <p>
                     Publish filtered assets from garrysmod/maps, materials, models, sound, particles and fonts in
                     resource. Lua, configs, secrets, links and addon archives are excluded. Only the copied asset
-                    snapshot is public.
+                    snapshot is public. Downloads use the Panel domain.
                 </p>
                 <p className={'mt-2'}>
                     FastDL serves resources requested by the game. Custom assets may also need resource.AddFile in your
@@ -284,7 +289,8 @@ export default () => {
                 )}
                 {status?.fastdl.job && (
                     <p role={'status'} className={'mt-3'}>
-                        Publication: {status.fastdl.job.status} ({status.fastdl.job.completed}/{status.fastdl.job.total}
+                        FastDL: {status.fastdl.job.status} — {status.fastdl.job.phase} ({status.fastdl.job.completed}/
+                        {status.fastdl.job.total}
                         ). {status.fastdl.job.message}
                     </p>
                 )}
@@ -294,10 +300,9 @@ export default () => {
                     onClick={() =>
                         run(async () => {
                             setDownload(undefined);
-                            setDownload(
-                                (await http.post<DownloadPreview>(`${base}/fastdl/preview`, {}, { timeout: 60000 }))
-                                    .data
-                            );
+                            await http.post(`${base}/fastdl/preview`);
+                            setNotice('Preparing your private asset preview. Progress updates automatically.');
+                            await refresh();
                         })
                     }
                 >
@@ -325,7 +330,7 @@ export default () => {
                                         await http.post(`${base}/fastdl/publish`, { preview: download.preview });
                                         setDownload(undefined);
                                         setNotice(
-                                            'FastDL publication started on the node. This page checks progress every 10 seconds.'
+                                            'FastDL publication started. Your download URL appears when compression completes.'
                                         );
                                         await refresh();
                                     })

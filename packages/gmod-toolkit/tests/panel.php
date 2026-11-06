@@ -22,7 +22,7 @@ use Pterodactyl\Models\User;
 use Pterodactyl\Models\Server;
 use Pterodactyl\Models\Subuser;
 use Pterodactyl\Models\Node;
-use Pterodactyl\Addons\GmodToolkit\{Workshop,State,Access,WingsFiles,NodeClient,ToolkitController,Enabled};
+use Pterodactyl\Addons\GmodToolkit\{Workshop,State,Access,WingsFiles,Fastdl,ToolkitController,Enabled};
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 function same($expected, $actual): void { if ($expected !== $actual) { throw new RuntimeException('Expected ' . json_encode($expected) . '; got ' . json_encode($actual)); } }
@@ -143,13 +143,13 @@ class MemoryWings extends WingsFiles {
     public function read(Server $server): ?string { return $this->current; }
     public function write(Server $server, string $bytes): void { ++$this->writes; $this->current = $bytes; }
 }
-class FakeNode extends NodeClient {
+class FakeFastdl extends Fastdl {
     public array $calls = [];
     public function __construct() {}
-    public function call(Server $server, int $actor, string $action, array $extra = []): array { $this->calls[] = [$server->uuid, $actor, $action]; return ['files' => 0]; }
+    public function preview(Server $server, int $actor): array { $this->calls[] = [$server->uuid, $actor, 'preview']; return ['status' => 'running']; }
 }
-$files = new MemoryWings(); $fakeNode = new FakeNode();
-$controller = new ToolkitController($access, $state, $files, $workshop, $fakeNode);
+$files = new MemoryWings(); $fakeFastdl = new FakeFastdl();
+$controller = new ToolkitController($access, $state, $files, $workshop, $fakeFastdl);
 test('Workshop preview/apply/backup/restore, stale edits and actor binding', function () use ($controller, $owner, $reader, $server, $files, $state) {
     $preview = $controller->preview(requestFor($owner, ['collection' => '100']), $server)->getData(true);
     same('original user Lua', $preview['before']); same(0, $files->writes);
@@ -166,15 +166,13 @@ test('Workshop preview/apply/backup/restore, stale edits and actor binding', fun
     same('original user Lua', $files->current);
     reject(fn () => $controller->apply(requestFor($owner, ['preview' => $restore['preview']]), $server), 409);
 });
-test('FastDL calls are permission checked before reaching the bound server node', function () use ($controller, $server, $sub, $reader, $stranger, $fakeNode) {
+test('FastDL calls are permission checked before publishing', function () use ($controller, $server, $sub, $reader, $stranger, $fakeFastdl) {
     $sub->permissions = ['file.read', 'file.read-content'];
     reject(fn () => $controller->fastdl(requestFor($stranger), $server, 'preview'), 403);
     reject(fn () => $controller->fastdl(requestFor($reader), $server, 'publish'), 403);
-    same([], $fakeNode->calls);
+    same([], $fakeFastdl->calls);
     $controller->fastdl(requestFor($reader), $server, 'preview');
-    same([[$server->uuid, 43, 'preview']], $fakeNode->calls);
-    same('https://na1.konnecthosting.com', NodeClient::origin('na1.konnecthosting.com'));
-    reject(fn () => NodeClient::origin('na1.example.test/../../x'));
+    same([[$server->uuid, 43, 'preview']], $fakeFastdl->calls);
 });
 test('existing membership and suspension middleware is retained', function () use ($server, $owner, $stranger) {
     $middleware = new \Pterodactyl\Http\Middleware\Api\Client\Server\AuthenticateServerAccess();
@@ -210,14 +208,15 @@ test('enabled-version guard rejects stale routes after disable/update', function
     $path = $host->stateRoot . '/registry.json';
     if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'), true);
-    $record = ['version' => '1.0.0', 'manifest' => $manifest, 'enabled' => true];
+    $record = ['version' => '1.1.0', 'manifest' => $manifest, 'enabled' => true];
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     same('ok', (new Enabled())->handle(Request::create('/test'), fn () => 'ok'));
     $record['enabled'] = false;
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     reject(fn () => (new Enabled())->handle(Request::create('/test'), fn () => 'bad'), 404);
-    $record['enabled'] = true; $record['version'] = $record['manifest']['version'] = '1.1.0';
+    $record['enabled'] = true; $record['version'] = $record['manifest']['version'] = '1.2.0';
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     reject(fn () => (new Enabled())->handle(Request::create('/test'), fn () => 'bad'), 404);
 });
-echo "$passed Panel/Workshop tests passed. No real Wings/Steam requests were made.\n";
+require __DIR__ . '/fastdl.php';
+echo "$passed Panel/Workshop/FastDL tests passed. No real Wings/Steam requests were made.\n";

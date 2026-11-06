@@ -15,7 +15,7 @@ def digest(path):
 
 files = []
 for source in sorted((ADDON / 'payload').iterdir()):
-    if source.suffix == '.php' and not source.name.endswith('.blade.php'):
+    if source.suffix in ['.php', '.py'] and not source.name.endswith('.blade.php'):
         target = 'app/Addons/GmodToolkit/' + source.name
     elif source.name.endswith('.blade.php'):
         target = 'resources/views/addons/gmod_toolkit/' + source.name
@@ -46,6 +46,15 @@ specs = [
             exact: true,
         },
 """),
+    ('public-fastdl', 'routes/base.php', 'use Pterodactyl\\Http\\Middleware\\RequireTwoFactorAuthentication;\n',
+     """
+// Only approved immutable asset snapshots are publicly downloadable.
+Route::get('/fastdl/{token}/{path}', \\Pterodactyl\\Addons\\GmodToolkit\\DownloadController::class)
+    ->where('token', '[a-f0-9]{64}')->where('path', '.+')
+    ->withoutMiddleware(['auth.session', RequireTwoFactorAuthentication::class])
+    ->middleware(\\Pterodactyl\\Addons\\GmodToolkit\\Enabled::class)
+    ->name('gmod-toolkit.fastdl');
+"""),
 ]
 patches = []
 for name, target, find, addition in specs:
@@ -57,8 +66,8 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.0.0',
-    'description': 'Workshop client Lua with previews/backups and node-local FastDL publishing with per-server permissions.',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.1.0',
+    'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,
     'extensions': {
@@ -66,8 +75,9 @@ manifest = {
         'menus': [{'id': 'settings-menu', 'label': 'GMod Toolkit', 'page': 'settings-page'}],
         'routes': [
             {'id': 'settings-save', 'path': 'settings/save', 'method': 'POST', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\AdminController@save', 'permission': 'admin'},
-            {'id': 'node-provision', 'path': 'nodes/provision', 'method': 'POST', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\AdminController@provision', 'permission': 'admin'},
         ],
+        'jobs': [{'id': 'fastdl-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@handle', 'permission': 'system'}],
+        'schedules': [{'id': 'fastdl-recover', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@recover', 'frequency': 'everyMinute', 'permission': 'system'}],
     },
     'database': {'dataPolicy': 'preserve', 'migrations': []},
     'build': {'mode': 'panel', 'profile': 'panel-v1', 'outputs': ['public/assets']},

@@ -1,67 +1,67 @@
-# GMod Toolkit 1.0.0
+# GMod Toolkit 1.1.0
 
-Neutral Addon Manager package for Panel 1.15.1, manager 2.0.1 and PHP 8.2/8.3.
-Arix is optional. Uses declared native Panel route/frontend patches and the
-manager's `panel-v1` frontend build, so the host needs its matching frozen
-frontend dependencies and working isolated build runner.
+One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
+Install the public package-folder URL in the manager's Install addon dialog.
+GMod eggs are recognized automatically by egg name or the trusted `-game garrysmod` startup template. Optional admin settings support custom egg names.
+Customers then open the GMod Toolkit server tab.
 
-After installation, open GMod Toolkit in the manager's admin extension menu and
-enable your actual GMod eggs. Customers use the **GMod Toolkit** server tab.
-The expected game directory is `/home/container/garrysmod`.
+Workshop accepts Steam collection IDs/links, resolves nested GMod collections,
+removes duplicate/cyclic references and previews the item list, changes, old Lua
+and generated Lua. Apply writes only
+`garrysmod/lua/autorun/server/gmod_toolkit_workshop.lua` using the existing Wings
+file API. The 20 most recent previous versions are retained privately on the
+Panel and can be previewed/restored. Previews belong to the requesting user and
+server, expire after 15 minutes, and reject edits to the target file. Private,
+unavailable and non-GMod Workshop items fail without applying partial Lua.
 
-Workshop accepts a Steam collection ID or steamcommunity.com collection
-link, resolves nested GMod collections, removes duplicate references and cycles,
-and previews the resolved items, additions/removals, current Lua and replacement.
-Apply writes only `garrysmod/lua/autorun/server/gmod_toolkit_workshop.lua`.
-The 20 most recent previous versions are backed up privately on the Panel;
-select a backup to preview and restore it. Previews are bound to a user/server,
-expire after 15 minutes, and reject changes to the target file. Unavailable,
-private, non-GMod or oversized collections fail without applying partial Lua.
-Public Steam metadata is fetched from Valve's fixed HTTPS API endpoints without
-an API key. Steam availability/rate limits affect preview creation.
+Client Workshop downloads and server mounting are separate. The generated Lua
+contains only `resource.AddWorkshop` calls with validated numeric IDs. Configure
+server mounting through the egg's existing Startup collection variable or
+`+host_workshop_collection COLLECTION_ID`; the UI links to Startup when permitted.
+Steam credentials are never included in generated Lua or public downloads.
 
-This Lua requests **client** Workshop downloads. Configure **server** mounting
-separately using the egg's editable Workshop collection startup variable or
-`+host_workshop_collection COLLECTION_ID`. The UI shows the exact collection
-argument. Startup and Steam API credentials are not modified, stored in Lua, or
-published. Restart the game server when ready after applying client Lua.
+FastDL is hosted on the **Panel** at
+`https://YOUR-PANEL/fastdl/<random-per-server-token>/`. The addon uses existing
+Wings APIs to create a private asset snapshot through the Panel's existing queue.
+The completed preview shows added/changed/removed files before publication.
+Publishing compresses the exact approved snapshot into `.bz2` files, retains raw
+fallbacks and switches the public generation only when every file succeeds.
+Later live source edits do not change an already-approved snapshot. To publish
+new bytes, create another preview. URL rotation and revocation are built in.
 
-FastDL uses the server's node FQDN, for example
-`https://na1.konnecthosting.com/fastdl/<random-token>/`. The companion node
-publisher must be installed once per Wings node using the separate `node/`
-instructions from this addon's source repository. The Panel addon does not
-install host services or alter Proxmox. Download its private per-node config
-from the admin extension page, install the companion on the node, and add its
-Nginx locations to the node's HTTPS virtual host. Existing Wings routes remain.
+The UI provides the actual `sv_downloadurl` setting for server.cfg. FastDL hosts
+resources requested by the game; custom assets may also need `resource.AddFile`
+registration in private server Lua. Only maps, materials, models, sounds,
+particles and resource fonts with approved extensions are eligible. Lua, cfg,
+hidden/sensitive filenames, archives (including GMA/VPK), special files and
+reported symbolic links are excluded. There is no live-directory alias or
+arbitrary public file proxy. Assets in addon archives are not unpacked.
 
-Customers preview eligible asset changes and explicitly publish them publicly.
-The node produces `.bz2` and raw copies, then switches the published snapshot.
-The UI gives a ready-to-copy `sv_downloadurl` configuration. Rotate or revoke
-the random per-server URL from the same tab. Raw UUIDs and container directories
-are not used as public download roots. Lua, configs, secrets, addon archives,
-links and special files are excluded; only named game asset extensions qualify.
-No automatic GMA extraction or Workshop archive publishing is performed.
-FastDL serves files requested by the game; custom resources may still need
-`resource.AddFile` registration in private server Lua. The addon does not publish
-that Lua or assume every published asset should be forced onto every client.
+All runtime code is in this addon. There are no node daemons, node API keys,
+node web-server changes, game-container installers or Proxmox changes. The
+existing Panel Python 3 runtime supplies standard-library bzip2 compression;
+the bounded helper is part of the addon, not a separate installation. The Panel
+uses its own disk and bandwidth for snapshots and public downloads.
 
-Customers need `file.read` AND `file.read-content` for previews/status, and also
-`file.create` AND `file.update` for all changes, including public publishing,
-rotation and revocation. Existing owner/admin and per-server membership checks,
-CSRF/session authentication, two-factor checks and suspension checks are retained.
-The tab may appear on other games, but the server API only permits configured
-GMod eggs. There is no new invented client permission string.
+Customers need `file.read` AND `file.read-content` for previews/status, plus
+`file.create` AND `file.update` for changes. Queue steps recheck the actor's
+current permissions and server state. Authentication, session CSRF, two-factor
+and per-server membership middleware are retained. Public routes serve only
+approved immutable snapshot objects and require the addon to remain enabled.
+Suspended/deleted servers and disabled eggs stop public downloads immediately
+on the next request. Rotated/revoked URLs fail on the next request too.
 
-Private settings/backups live in `storage/app/gmod-toolkit`. Node snapshots live
-in `/var/lib/gmod-toolkit`, outside game volumes and public web roots. Disable or
-delete removes addon routes/frontend through manager reconstruction and retains
-private data. Public serving is a separate node service: **revoke public URLs
-before disabling/deleting the addon or game server** if serving must stop.
-Suspension does not automatically revoke published snapshots in this version.
-Updates keep the same addon ID and private storage. Retained state uses only
-additive/optional fields; no destructive database migrations are included.
+Private state is retained in `storage/app/gmod-toolkit` on disable/delete.
+Removing the addon reconstructs its routes/frontend through the manager; no
+separate service remains. Re-enabling may resume retained valid publications.
+Existing queue/scheduler services provide recovery; duplicate/stale queue steps
+are ignored. Each step handles one directory or one asset. Limits: 128 MiB/file,
+2 GiB raw/server, 5000 files, 20,000 inspected entries, 4 MiB directory responses,
+one hour per preparation/publication, and 15 minutes to approve a finished
+preview. A 1 GiB free-space reserve protects the Panel. Compression has independent CPU/memory/time limits. Expired private
+previews are cleaned automatically. Previous publications survive failed builds.
 
-The source repository includes SDK export tooling, executable tests, the node
-companion and full operational instructions. No live deployment is performed by
-building or exporting this package. Host-specific TLS/listener setup and a live
-Panel/Wings/GMod smoke test are required before offering it to customers.
+This is a native Panel frontend package using the manager's panel-v1 profile.
+It adds no package-manager dependencies. The host must already have the working
+Panel queue/scheduler and its matched frozen frontend dependencies. See the
+source repository's verification record for executed tests and live-game checks.

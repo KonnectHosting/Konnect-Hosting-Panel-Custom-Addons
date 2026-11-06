@@ -1,36 +1,22 @@
 @extends('layouts.admin')
 @section('title', 'GMod Toolkit')
 @section('content-header')
-    <h1>GMod Toolkit <small>Workshop and node FastDL</small></h1>
+    <h1>GMod Toolkit <small>Workshop and Panel FastDL</small></h1>
 @endsection
 @section('content')
     @php($settings = app(\Pterodactyl\Addons\GmodToolkit\State::class)->read('settings'))
     @if(session('status'))<div class="alert alert-success">{{ session('status') }}</div>@endif
     <div class="box box-primary"><div class="box-body">
         <h3>Enable customer tools for Garry's Mod eggs</h3>
-        <p>Choose the actual GMod eggs used on this installation. Customer operations require file read permissions; changes also require file create and update. This addon expects the game in /home/container/garrysmod.</p>
+        <p>GMod eggs are recognized automatically by name/startup. This optional override lets you choose custom eggs. Customer operations require file read permissions; changes also require file create and update. This addon expects the game in /home/container/garrysmod.</p>
         <form method="post" action="/admin/addon-manager/extensions/gmod.toolkit/settings/save">
             @csrf
+            <label style="display:block"><input type="checkbox" name="automatic" value="1" @if(!array_key_exists('eggs', $settings)) checked @endif> Automatically recognize GMod eggs (default)</label>
             @foreach(\Pterodactyl\Models\Egg::orderBy('name')->get(['id', 'name']) as $egg)
                 <label style="display:block"><input type="checkbox" name="eggs[]" value="{{ $egg->id }}" @if(in_array((int) $egg->id, $settings['eggs'] ?? [], true)) checked @endif> {{ $egg->name }} (#{{ $egg->id }})</label>
             @endforeach
             <button type="submit" class="btn btn-primary">Save enabled eggs</button>
         </form>
-    </div></div>
-    <div class="box"><div class="box-body">
-        <h3>Provision a FastDL node</h3>
-        <p>Workshop tools use Wings directly. FastDL requires the companion publisher once per node and the supplied Nginx locations on HTTPS port 443 at the node FQDN. Download its private configuration below, then follow packages/gmod-toolkit/node/README.md. Keep config.json private; it contains the node API key.</p>
-        <form method="post" action="/admin/addon-manager/extensions/gmod.toolkit/nodes/provision">
-            @csrf
-            <label for="gmod-node">Node</label><select id="gmod-node" name="node" class="form-control">
-                @foreach(\Pterodactyl\Models\Node::orderBy('name')->get(['id', 'name', 'fqdn']) as $node)
-                    <option value="{{ $node->id }}">{{ $node->name }} — {{ $node->fqdn }}</option>
-                @endforeach
-            </select>
-            <label for="gmod-volumes">Wings volume directory on that node</label>
-            <input id="gmod-volumes" name="volume_root" value="/var/lib/pterodactyl/volumes" class="form-control" required>
-            <button type="submit" class="btn btn-primary" style="margin-top:12px">Download private node config</button>
-        </form>
-        <p style="margin-top:12px">A repeated download retains the existing API key. Node downloads remain available until their URL is revoked or the node publisher is stopped. Revoke publications before disabling or deleting the addon if you want public downloads stopped; private backups and published data are retained.</p>
+        <p>FastDL uses the Panel domain, existing queue and Wings file API. Installing this addon is the complete deployment; there are no node services or game-container scripts to provision.</p>
     </div></div>
 @endsection
