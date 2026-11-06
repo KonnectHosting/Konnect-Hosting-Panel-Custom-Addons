@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace Pterodactyl\Addons\GmodToolkit;
 
 use AddonManager\Laravel\ExtensionRegistry;
+use AddonManager\Laravel\AddonJob;
 use Closure;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Pterodactyl\Models\Server;
 use Pterodactyl\Models\User;
 use RuntimeException;
@@ -12,12 +14,23 @@ use Symfony\Component\Process\Process;
 
 class Fastdl
 {
-    public const VERSION = '1.1.1';
+    public const VERSION = '1.1.2';
     private Closure $enqueue;
 
     public function __construct(private State $state, private AssetSource $source, private Access $access, ?Closure $enqueue = null)
     {
-        $this->enqueue = $enqueue ?? static fn (array $payload) => app(ExtensionRegistry::class)->dispatchJob('gmod.toolkit', self::VERSION, 'fastdl-step', $payload);
+        $this->enqueue = $enqueue ?? static function (array $payload): mixed {
+            // Manager 2.0.1's dispatchJob uses the removed Laravel "bus" alias.
+            // Keep its exact-version/registration guards and native job wrapper,
+            // but resolve Laravel's supported dispatcher contract directly.
+            $manifest = app(ExtensionRegistry::class)->guard('gmod.toolkit', self::VERSION, 'system');
+            foreach ($manifest['extensions']['jobs'] ?? [] as $job) {
+                if ($job['id'] === 'fastdl-step' && $job['permission'] === 'system') {
+                    return app(Dispatcher::class)->dispatch(new AddonJob('gmod.toolkit', self::VERSION, 'fastdl-step', $payload));
+                }
+            }
+            throw new RuntimeException('FastDL job registration is unavailable.');
+        };
     }
 
     private function key(string $uuid): string { return 'fastdl-server-' . $uuid; }
@@ -31,7 +44,13 @@ class Fastdl
     }
     private function dispatch(string $uuid, array $job): void
     {
-        ($this->enqueue)(['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence'], 'server' => $job['server'], 'actor' => $job['actor']]);
+        $payload = ['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence'], 'server' => $job['server'], 'actor' => $job['actor']];
+        try { ($this->enqueue)($payload); }
+        catch (\Throwable $error) {
+            $message = 'The Panel queue could not accept the FastDL operation. Ask your host to check the Panel queue, then retry.';
+            $this->fail($payload, $message);
+            throw new RuntimeException($message, 0, $error);
+        }
     }
     private function space(string $snapshot, int $bytes): void
     {
@@ -51,7 +70,9 @@ class Fastdl
         }
         return ['url' => $r['token'] ? $this->url($r['token']) : null, 'files' => count($r['manifest']),
             'preview' => $preview, 'job' => $job ? ['status' => $job['status'], 'phase' => $job['phase'], 'message' => $job['message'],
-                'completed' => $job['cursor'], 'total' => count($job['entries'])] : null];
+                'completed' => $job['cursor'], 'total' => count($job['entries']),
+                'inspected' => $job['visited'], 'pendingDirectories' => count($job['dirs']),
+                'waiting' => $job['status'] === 'running' && (int) ($job['progressed'] ?? $job['updated']) < time() - 90] : null];
     }
 
     private function previewResult(array $r, array $job): array
@@ -73,7 +94,7 @@ class Fastdl
             $id = bin2hex(random_bytes(32));
             $r['job'] = ['id' => $id, 'server' => $server->id, 'actor' => $actor, 'status' => 'running', 'phase' => 'scan',
                 'dirs' => [''], 'entries' => [], 'manifest' => [], 'bytes' => 0, 'visited' => 0, 'skipped' => 0, 'cursor' => 0,
-                'sequence' => 0, 'attempts' => 0, 'updated' => time(), 'expires' => time() + 3600, 'revision' => $r['revision'],
+                'sequence' => 0, 'attempts' => 0, 'updated' => time(), 'progressed' => time(), 'expires' => time() + 3600, 'revision' => $r['revision'],
                 'message' => '', 'snapshot' => 'fastdl-snapshot-' . $server->uuid . '-' . $id];
             $this->state->directory($r['job']['snapshot']);
             $this->state->write($this->key($server->uuid), $r);
@@ -90,7 +111,7 @@ class Fastdl
             abort_unless(($job['status'] ?? null) === 'preview-ready' && $job['id'] === $preview && $job['actor'] === $actor
                 && $job['expires'] >= time() && $job['revision'] === $r['revision'], 409, 'Preview expired, changed, or belongs to another user.');
             if (!is_executable('/usr/bin/python3') || !is_file(__DIR__ . '/compress.py')) { throw new RuntimeException('The Panel\'s Python 3 runtime is unavailable.'); }
-            $job['status'] = 'running'; $job['phase'] = 'compress'; $job['cursor'] = 0; $job['updated'] = time(); $job['expires'] = time() + 3600;
+            $job['status'] = 'running'; $job['phase'] = 'compress'; $job['cursor'] = 0; $job['updated'] = time(); $job['progressed'] = time(); $job['expires'] = time() + 3600;
             ++$job['sequence']; $job['attempts'] = 0; $r['job'] = $job;
             $this->state->write($this->key($server->uuid), $r);
             return $job;
@@ -145,7 +166,7 @@ class Fastdl
                     $this->state->write('fastdl-token-' . $r['token'], ['uuid' => $server->uuid, 'server' => $server->id]);
                     $job['status'] = 'complete';
                 }
-                ++$job['sequence']; $job['attempts'] = 0; $job['updated'] = time(); $r['job'] = $job;
+                ++$job['sequence']; $job['attempts'] = 0; $job['updated'] = time(); $job['progressed'] = time(); $r['job'] = $job;
                 $this->state->write($this->key($server->uuid), $r);
                 if ($job['status'] === 'running') { $next = $job; }
                 if (isset($old) && $old && $old !== $r['generation']) { $this->state->removeDirectory($old); }
@@ -226,6 +247,7 @@ class Fastdl
         $this->state->locked($this->key($payload['uuid']), function () use ($payload, $message) {
             $r = $this->record($payload['uuid']);
             if (($r['job']['id'] ?? null) !== ($payload['job'] ?? null)) { return; }
+            if (isset($payload['sequence']) && ($r['job']['sequence'] ?? null) !== $payload['sequence']) { return; }
             $r['job']['status'] = 'failed'; $r['job']['message'] = $message;
             $this->state->write($this->key($payload['uuid']), $r);
             if ($r['job']['snapshot'] !== $r['generation']) { $this->state->removeDirectory($r['job']['snapshot']); }
@@ -236,12 +258,14 @@ class Fastdl
     {
         $r = $this->record($uuid); $job = $r['job'] ?? null;
         if (!$job) { return; }
-        if ($job['status'] === 'preview-ready' && $job['expires'] < time()) {
-            $this->fail(['uuid' => $uuid, 'job' => $job['id']], 'Preview expired.');
+        if (in_array($job['status'], ['running', 'preview-ready'], true) && $job['expires'] < time()) {
+            $this->fail(['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence']], $job['status'] === 'running'
+                ? 'FastDL timed out. The host should check the existing Panel queue worker before you retry.' : 'Preview expired.');
         } elseif ($job['status'] === 'running' && $job['updated'] < time() - 90) {
             $next = $this->state->locked($this->key($uuid), function () use ($uuid) {
                 $r = $this->record($uuid); $job = $r['job'] ?? null;
                 if (!$job || $job['status'] !== 'running' || $job['updated'] >= time() - 90) { return null; }
+                $r['job']['progressed'] ??= $job['updated'];
                 $r['job']['updated'] = time();
                 $this->state->write($this->key($uuid), $r);
                 return $r['job'];

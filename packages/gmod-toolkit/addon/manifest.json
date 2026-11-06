@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "gmod.toolkit",
   "name": "GMod Toolkit",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.",
   "compatibility": {
     "manager": "=2.0.1",
@@ -40,17 +40,17 @@
     {
       "source": "payload/Enabled.php",
       "target": "app/Addons/GmodToolkit/Enabled.php",
-      "sha256": "e9dffe916ab1bff95542730a76913c1fd9089578fd9bdaf4db48c831f3bdba5f"
+      "sha256": "5d3f014b6bcd41f7c9ce210d213328714a56bc30c3cb0a8be7048a6b3ced2775"
     },
     {
       "source": "payload/Fastdl.php",
       "target": "app/Addons/GmodToolkit/Fastdl.php",
-      "sha256": "df03c212bd69bc6e8c537ec73b3e4192db4f0034ab7dc1147a471866ae89ae2a"
+      "sha256": "fe795dcaff885560fa26b8a00bee315e0124c415fff777aa0c20556ea5a77f86"
     },
     {
       "source": "payload/GmodToolkitContainer.tsx",
       "target": "resources/scripts/components/server/gmodToolkit/GmodToolkitContainer.tsx",
-      "sha256": "f4f12ca5cd4ed443b26c779bbd012bb830719ad83e41d6576f29dd5e54d6b551"
+      "sha256": "e0620be8a688daeaae22aa252d10f5f4f7b41952734cee404dba6908dd53bdda"
     },
     {
       "source": "payload/State.php",
@@ -70,7 +70,7 @@
     {
       "source": "payload/Workshop.php",
       "target": "app/Addons/GmodToolkit/Workshop.php",
-      "sha256": "613198de75484cf0e0fba74546e9b2b333aa4083d0953cd34e0023236b51eb20"
+      "sha256": "4d66a9630ee621fa832f95a457086c92ab93a9abebc27ac8c32866db61683d8d"
     },
     {
       "source": "payload/compress.py",

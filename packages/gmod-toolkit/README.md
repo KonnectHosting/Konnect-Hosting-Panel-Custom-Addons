@@ -1,4 +1,4 @@
-# GMod Toolkit 1.1.1
+# GMod Toolkit 1.1.2
 
 A single Panel addon: install through the existing Addon Manager dialog, then
 use the GMod Toolkit server tab. It needs **no node changes or companion
@@ -10,7 +10,7 @@ frontend build and existing Wings/queue integrations do the work.
 Paste this URL into **Addon Manager → Install addon → GitHub package URL**:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/c71f810bc068026b48533b560fbbe4e21a927ca4
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/4b1c932541b99412fda3ae2d27f078e4e03ac032
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -18,11 +18,20 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.1.1.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.1.2.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
-use the same addon ID `gmod.toolkit` and the next version's immutable package URL.
+use **GMod Toolkit → Update**, the same addon ID `gmod.toolkit` and this version's immutable package URL.
 Keep the existing private state; the manager reconstructs source and retains data.
+
+On Arix, add **GMod Toolkit** from the Editor's **Missing Links** list to a
+category restricted to the GMod eggs and save. The route is `/gmod-toolkit`.
+
+Version 1.1.2 fixes valid collections being rejected when Steam omits the
+published-file type field, and fixes FastDL enqueueing on the installed manager
+without requiring a separate manager update. The customer page now provides
+upload folders, Files links, preview/publish instructions, queue progress,
+a labeled download URL and copy buttons for the URL and server.cfg settings.
 
 ## Customer tools
 
@@ -48,6 +57,14 @@ Customers copy the generated `sv_downloadurl` setting into server.cfg. A stopped
 GMod process does not interrupt published downloads. The node FQDN is not used:
 serving custom HTTP paths there would require changes the node owner controls.
 
+Upload extracted assets through Files/SFTP to `/garrysmod/maps/`, `materials/`,
+`models/`, `sound/`, `particles/` or `resource/fonts/` beneath the server root.
+Preserve subfolders and upload the raw files; compression is automatic. Create
+a preview, review it, then publish. The URL becomes available after the first
+successful publication. Copy the provided settings into
+`/garrysmod/cfg/server.cfg`, then restart the game server or apply the settings
+in its console. Repeat preview/publication after changing assets.
+
 Only approved game assets are public. The addon never aliases /home/container,
 serves game files on demand, exposes Lua/cfg/archives, or installs a web server in
 a game container. Server file reads use the existing server-bound Wings API;
@@ -57,7 +74,7 @@ private snapshot is the object the customer previews and approves.
 
 ## Isolated validation compatibility
 
-Version 1.1.1 has no registered scheduler hook. Authorized status polling resumes
+Version 1.1.2 has no registered scheduler hook. Authorized status polling resumes
 only that server's interrupted work, with throttling and fresh worker permission
 checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
 starts telemetry registration, which queries a settings table absent from the
@@ -113,8 +130,8 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.1.1.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.1.1.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.1.2.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.1.2.zip.sha256)
 ```
 
 The original deployed probe is covered by an executable regression (a full Git

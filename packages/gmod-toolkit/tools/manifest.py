@@ -66,7 +66,7 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.1.1',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.1.2',
     'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,

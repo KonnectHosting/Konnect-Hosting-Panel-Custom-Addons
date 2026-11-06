@@ -182,6 +182,31 @@ test('queued work rechecks permissions and recovers interrupted steps', function
     $drain(); same('failed',$engine->info($server,42)['job']['status']); same(null,$engine->info($server,42)['url']);
     $server->owner_id = 42;
 });
+test('scan status distinguishes pending work and recovery cannot hide a stalled queue', function () use ($server) {
+    [$state, $source, $queue, $engine, $drain] = fastdlFixture();
+    $engine->preview($server, 42);
+    $info = $engine->info($server, 42);
+    same(0, $info['job']['inspected']); same(1, $info['job']['pendingDirectories']); same(false, $info['job']['waiting']);
+    $key = 'fastdl-server-' . $server->uuid;
+    $r = $state->read($key); $r['job']['updated'] = time() - 120; unset($r['job']['progressed']); $state->write($key, $r);
+    same(true, $engine->info($server, 42)['job']['waiting']);
+    same(true, $engine->info($server, 42)['job']['waiting']);
+    $drain(); same(false, $engine->info($server, 42)['job']['waiting']);
+    $engine->preview($server, 42); $r = $state->read($key); $snapshot = $state->directory($r['job']['snapshot']);
+    $r['job']['expires'] = time() - 1; $state->write($key, $r);
+    $info = $engine->info($server, 42);
+    same('failed', $info['job']['status']); same(true, str_contains($info['job']['message'], 'timed out'));
+    same(false, is_dir($snapshot));
+});
+test('enqueue failures leave a retryable failure rather than a permanently running scan', function () use ($server, $panel) {
+    $state = new State($panel . '/storage/app/failed-enqueue-' . bin2hex(random_bytes(6)));
+    $engine = new Fastdl($state, new MemoryAssets(), new Access($state), static function (array $payload): void { throw new RuntimeException('Synthetic queue outage'); });
+    reject(fn () => $engine->preview($server, 42));
+    $info = $engine->info($server, 42);
+    same('failed', $info['job']['status']); same(true, str_contains($info['job']['message'], 'could not accept'));
+    reject(fn () => $engine->preview($server, 42));
+    same('failed', $engine->info($server, 42)['job']['status']);
+});
 
 class AssetRepositoryFixture extends FakeWingsRepository {
     public bool $oversized = false;
@@ -215,15 +240,42 @@ test('existing Wings API streams assets with size, ancestry and link checks',fun
 test('manager guarded jobs resolve fresh actors and use the existing queue contract',function()use($app,$panel,$server){
     [$state,$source,$queue,$engine,$drain]=fastdlFixture();$app->instance(Fastdl::class,$engine);
     $manifest=json_decode(file_get_contents(dirname(__DIR__).'/addon/manifest.json'),true);
-    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.1','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.2','manifest'=>$manifest,'enabled'=>true]]]));
     $engine->preview($server,42);
     $extensions=$app->make(\AddonManager\Laravel\ExtensionRegistry::class);$count=0;
     while(count($queue)){
         if(++$count>100)throw new RuntimeException('Unbounded guarded queue chain');
         $payload=$queue[0];$queue->offsetUnset(0);$queue->exchangeArray(array_values($queue->getArrayCopy()));
-        $extensions->runJob('gmod.toolkit','1.1.1','fastdl-step',$payload);
+        $extensions->runJob('gmod.toolkit','1.1.2','fastdl-step',$payload);
     }
     same('preview-ready',$engine->info($server,42)['job']['status']);
+});
+
+test('real bus serialization and standard queue execute the complete FastDL workflow', function () use ($app, $panel, $server, $db) {
+    $db->statement('CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, queue TEXT, payload TEXT, attempts INTEGER, reserved_at INTEGER, available_at INTEGER, created_at INTEGER)');
+    $app['config']->set('queue.connections.gmodqueue', ['driver' => 'database', 'connection' => 'gmodtest', 'table' => 'jobs', 'queue' => 'standard', 'retry_after' => 90, 'after_commit' => false]);
+    $app['config']->set('queue.default', 'gmodqueue');
+    try {
+        $state = new State($panel . '/storage/app/bus-test-' . bin2hex(random_bytes(6)));
+        $state->write('settings', ['eggs' => [1]]);
+        $engine = new Fastdl($state, new MemoryAssets(), new Access($state));
+        $app->instance(Fastdl::class, $engine);
+        $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'), true);
+        file_put_contents($panel . '/storage/app/addon-manager/registry.json', json_encode(['addons' => ['gmod.toolkit' => ['version' => $manifest['version'], 'manifest' => $manifest, 'enabled' => true]]]));
+        $queue = $app['queue']->connection('gmodqueue');
+        $drain = static function () use ($queue): void {
+            $count = 0;
+            while ($job = $queue->pop('standard')) {
+                if (++$count > 100) { throw new RuntimeException('Unbounded real queue chain'); }
+                $job->fire(); $job->delete();
+            }
+        };
+        $engine->preview($server, 42); same(1, $queue->size('standard'));
+        $drain(); $preview = $engine->info($server, 42)['preview']; same(2, $preview['files']);
+        $engine->publish($server, 42, $preview['preview']); $drain();
+        same('complete', $engine->info($server, 42)['job']['status']);
+        same(0, $queue->size('standard'));
+    } finally { $app['config']->set('queue.default', 'redis'); }
 });
 
 // Exercise the anonymous public route through the real HTTP kernel and its guard.
@@ -232,7 +284,7 @@ test('anonymous HTTP FastDL is limited to enabled approved asset snapshots', fun
     $app->instance(Fastdl::class,$engine);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'),true);
     $registry = $panel . '/storage/app/addon-manager/registry.json';
-    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.1','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.2','manifest'=>$manifest,'enabled'=>true]]]));
     $kernel=$app->make(\Illuminate\Contracts\Http\Kernel::class);
     $request=\Illuminate\Http\Request::create('/fastdl/'.$token.'/maps/test.bsp','GET');
     $response=$kernel->handle($request); same(200,$response->getStatusCode()); same('application/octet-stream',$response->headers->get('Content-Type'));

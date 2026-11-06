@@ -144,7 +144,7 @@ final class ExtensionRegistry
         $manifest = $this->guard($id, $version, 'system');
         foreach ($manifest['extensions']['jobs'] ?? [] as $job) {
             if ($job['id'] === $jobId && $job['permission'] === 'system') {
-                return $this->app['bus']->dispatch(new AddonJob($id, $version, $jobId, $payload));
+                return $this->app->make(\Illuminate\Contracts\Bus\Dispatcher::class)->dispatch(new AddonJob($id, $version, $jobId, $payload));
             }
         }
         throw new RuntimeException('Unknown enabled addon job registration.');

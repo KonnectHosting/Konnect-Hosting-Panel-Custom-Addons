@@ -1,9 +1,11 @@
-# GMod Toolkit 1.1.1
+# GMod Toolkit 1.1.2
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
 GMod eggs are recognized automatically by egg name or the trusted `-game garrysmod` startup template. Optional admin settings support custom egg names.
 Customers then open the GMod Toolkit server tab.
+On Arix, use its Editor's Missing Links list to add the detected GMod Toolkit
+route to a sidebar category, restrict that category to the GMod eggs, and save.
 
 Workshop accepts Steam collection IDs/links, resolves nested GMod collections,
 removes duplicate/cyclic references and previews the item list, changes, old Lua
@@ -29,7 +31,29 @@ fallbacks and switches the public generation only when every file succeeds.
 Later live source edits do not change an already-approved snapshot. To publish
 new bytes, create another preview. URL rotation and revocation are built in.
 
-The UI provides the actual `sv_downloadurl` setting for server.cfg. FastDL hosts
+Upload extracted files through the server's Files page or SFTP, preserving paths
+under `/garrysmod/maps/`, `/garrysmod/materials/`, `/garrysmod/models/`,
+`/garrysmod/sound/`, `/garrysmod/particles/` or `/garrysmod/resource/fonts/`.
+These paths are relative to `/home/container`. The UI links to the upload and
+configuration folders. Files in `addons/` and archives are not unpacked or
+published; upload the extracted public assets to the corresponding folders.
+Do not precompress them; the addon creates `.bz2` files when publishing.
+
+Click Preview FastDL changes, review the completed snapshot and publish it.
+Your unique URL appears after the first successful publication, with buttons
+to copy the URL and the `sv_downloadurl`/`sv_allowdownload`/`sv_allowupload`
+settings for `/garrysmod/cfg/server.cfg`. Save the settings and restart the game
+server, or apply the settings in its console now. Repeat preview/publication
+after source changes. Rotating the URL requires updating server.cfg again.
+
+Version 1.1.2 handles Steam's actual collection response without depending on
+the optional file-details type field. It also uses Laravel's dispatcher contract
+with the manager's native guarded job wrapper, avoiding the installed manager's
+missing `bus` binding. No manager update is needed. Scan status reports inspected
+entries and remaining folders; delayed workers are identified and expired work
+can be retried instead of remaining running forever.
+
+FastDL hosts
 resources requested by the game; custom assets may also need `resource.AddFile`
 registration in private server Lua. Only maps, materials, models, sounds,
 particles and resource fonts with approved extensions are eligible. Lua, cfg,

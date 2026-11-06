@@ -53,8 +53,10 @@ $fetch = static function (string $method, array $ids) use (&$fixture): array {
     foreach ($ids as $id) {
         $row = $fixture[$id] ?? [];
         $items[] = $method === 'GetCollectionDetails'
-            ? ['publishedfileid' => $id, 'result' => $row['result'] ?? 1, 'children' => array_map(static fn ($v) => ['publishedfileid' => $v], $row['children'] ?? [])]
-            : ['publishedfileid' => $id, 'result' => $row['result'] ?? 1, 'consumer_app_id' => $row['app'] ?? 4000, 'file_type' => $row['type'] ?? 0, 'title' => $row['title'] ?? $id];
+            ? ['publishedfileid' => $id, 'result' => ($row['type'] ?? null) === 2 ? ($row['result'] ?? 1) : 9,
+                'children' => array_map(static fn ($v) => ['publishedfileid' => $v, 'filetype' => $fixture[$v]['type'] ?? 0], $row['children'] ?? [])]
+            // Steam's published-file response can omit file_type entirely.
+            : ['publishedfileid' => $id, 'result' => $row['result'] ?? 1, 'consumer_app_id' => $row['app'] ?? 4000, 'title' => $row['title'] ?? $id];
     }
     return [$method === 'GetCollectionDetails' ? 'collectiondetails' : 'publishedfiledetails' => $items];
 };
@@ -67,6 +69,21 @@ test('collection links, nested resolution, cycles, duplicate removal and safe Lu
     same(false, str_contains($result['lua'], '<script>'));
     same('18446744073709551615', Workshop::id('18446744073709551615'));
     same('100', Workshop::id('http://SteamCommunity.com/sharedfiles/filedetails?id=100'));
+});
+test('Steam collection shape works without optional published-file type metadata', function () use (&$fixture, $workshop) {
+    $fixture['3788779421'] = ['type' => 2, 'children' => ['200', '101']];
+    foreach (['3788779421', 'https://steamcommunity.com/sharedfiles/filedetails/?id=3788779421'] as $input) {
+        $result = $workshop->resolve($input);
+        same('3788779421', $result['collection']);
+        same(['101', '102'], array_column($result['items'], 'id'));
+        same(false, str_contains($result['lua'], 'resource.AddWorkshop("200")'));
+    }
+    unset($fixture['3788779421']);
+});
+test('unknown collection entry types fail instead of generating incorrect downloads', function () use (&$fixture, $workshop) {
+    $fixture['102']['type'] = 1;
+    reject(fn () => $workshop->resolve('100'));
+    $fixture['102']['type'] = 0;
 });
 test('invalid hosts, credentials, duplicate query IDs and numeric overflow rejected', function () {
     foreach (['https://evil.test/?id=100', 'https://steamcommunity.com.evil.test/sharedfiles/filedetails/?id=100', 'https://user@steamcommunity.com/sharedfiles/filedetails/?id=100', 'https://steamcommunity.com/sharedfiles/filedetails/?id=100&id=101', '18446744073709551616', '1e10', '0', '1"\ncode'] as $value) {
@@ -208,7 +225,7 @@ test('enabled-version guard rejects stale routes after disable/update', function
     $path = $host->stateRoot . '/registry.json';
     if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'), true);
-    $record = ['version' => '1.1.1', 'manifest' => $manifest, 'enabled' => true];
+    $record = ['version' => '1.1.2', 'manifest' => $manifest, 'enabled' => true];
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     same('ok', (new Enabled())->handle(Request::create('/test'), fn () => 'ok'));
     $record['enabled'] = false;
