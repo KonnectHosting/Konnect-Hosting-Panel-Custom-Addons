@@ -32,16 +32,32 @@ specs = [
     // GMod Toolkit: retains the enclosing authenticated, per-server middleware.
     Route::prefix('/gmod-toolkit')->middleware(\\Pterodactyl\\Addons\\GmodToolkit\\Enabled::class)->group(function () {
         Route::get('/', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'status']);
+        Route::get('/workshop', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'workshopStatus']);
+        Route::get('/fastdl', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdlStatus']);
         Route::post('/workshop/preview', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'preview']);
         Route::post('/workshop/apply', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'apply']);
-        Route::post('/fastdl/{action}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdl'])->where('action', 'preview|publish|rotate|revoke');
+        Route::post('/fastdl/{action}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdl'])->where('action', 'prepare|preview|publish|rotate|revoke');
     });
 """),
     ('server-tab', 'resources/scripts/routers/routes.ts', '    server: [\n',
      """        {
+            path: '/fastdl',
+            permission: 'file.read-content',
+            name: 'FastDL',
+            component: lazy(() => import('@/components/server/gmodToolkit/FastdlContainer')),
+            exact: true,
+        },
+        {
+            path: '/workshop',
+            permission: 'file.read-content',
+            name: 'Workshop',
+            component: lazy(() => import('@/components/server/gmodToolkit/WorkshopContainer')),
+            exact: true,
+        },
+        {
             path: '/gmod-toolkit',
             permission: 'file.read-content',
-            name: 'GMod Toolkit',
+            name: undefined,
             component: lazy(() => import('@/components/server/gmodToolkit/GmodToolkitContainer')),
             exact: true,
         },
@@ -66,7 +82,7 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.1.2',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.2.0',
     'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,

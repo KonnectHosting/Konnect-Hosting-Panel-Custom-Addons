@@ -1,11 +1,12 @@
-# GMod Toolkit 1.1.2
+# GMod Toolkit 1.2.0
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
 GMod eggs are recognized automatically by egg name or the trusted `-game garrysmod` startup template. Optional admin settings support custom egg names.
-Customers then open the GMod Toolkit server tab.
-On Arix, use its Editor's Missing Links list to add the detected GMod Toolkit
-route to a sidebar category, restrict that category to the GMod eggs, and save.
+Customers have separate **FastDL** (`/fastdl`) and **Workshop** (`/workshop`)
+server pages. On Arix, remove the old GMod Toolkit sidebar entry and add both
+new routes from the Editor's Missing Links list to your conditional Garry's Mod
+category, then save. The old `/gmod-toolkit` bookmark redirects to Workshop.
 
 Workshop accepts Steam collection IDs/links, resolves nested GMod collections,
 removes duplicate/cyclic references and previews the item list, changes, old Lua
@@ -16,11 +17,9 @@ Panel and can be previewed/restored. Previews belong to the requesting user and
 server, expire after 15 minutes, and reject edits to the target file. Private,
 unavailable and non-GMod Workshop items fail without applying partial Lua.
 
-Client Workshop downloads and server mounting are separate. The generated Lua
-contains only `resource.AddWorkshop` calls with validated numeric IDs. Configure
-server mounting through the egg's existing Startup collection variable or
-`+host_workshop_collection COLLECTION_ID`; the UI links to Startup when permitted.
-Steam credentials are never included in generated Lua or public downloads.
+Workshop generates client-download Lua only. The server-mounting section and
+Startup link have been removed. Steam credentials are never included in generated
+Lua or public downloads.
 
 FastDL is hosted on the **Panel** at
 `https://YOUR-PANEL/fastdl/<random-per-server-token>/`. The addon uses existing
@@ -31,13 +30,32 @@ fallbacks and switches the public generation only when every file succeeds.
 Later live source edits do not change an already-approved snapshot. To publish
 new bytes, create another preview. URL rotation and revocation are built in.
 
-Upload extracted files through the server's Files page or SFTP, preserving paths
-under `/garrysmod/maps/`, `/garrysmod/materials/`, `/garrysmod/models/`,
-`/garrysmod/sound/`, `/garrysmod/particles/` or `/garrysmod/resource/fonts/`.
-These paths are relative to `/home/container`. The UI links to the upload and
-configuration folders. Files in `addons/` and archives are not unpacked or
-published; upload the extracted public assets to the corresponding folders.
-Do not precompress them; the addon creates `.bz2` files when publishing.
+FastDL reads only the dedicated **`/home/container/fastdl/`** upload directory.
+On the FastDL page, click **Prepare upload folders** to create this layout through
+the Panel's existing Wings file connection:
+
+```text
+fastdl/
+  maps/
+  materials/
+  models/
+  sound/
+  particles/
+  resource/fonts/
+```
+
+Upload extracted files using Files or SFTP, preserving game-relative names.
+For example, `fastdl/maps/rp_example.bsp` becomes `maps/rp_example.bsp` under
+your public download URL. Folder preparation is idempotent and does not overwrite
+uploads. Game assets under `garrysmod/` are never scanned, moved or copied by
+FastDL. Files inside `addons/` or archives are not unpacked or published.
+Do not precompress files; the addon creates `.bz2` copies when publishing.
+The UI links directly to `fastdl/` and to the server.cfg folder.
+
+When updating from an older version, existing publications and their URLs remain
+available. Unfinished previews from the previous source location are retired;
+create a fresh preview using the dedicated `fastdl/` folder. Private Workshop
+backups are preserved.
 
 Click Preview FastDL changes, review the completed snapshot and publish it.
 Your unique URL appears after the first successful publication, with buttons
@@ -46,7 +64,7 @@ settings for `/garrysmod/cfg/server.cfg`. Save the settings and restart the game
 server, or apply the settings in its console now. Repeat preview/publication
 after source changes. Rotating the URL requires updating server.cfg again.
 
-Version 1.1.2 handles Steam's actual collection response without depending on
+Workshop handles Steam's collection response without depending on
 the optional file-details type field. It also uses Laravel's dispatcher contract
 with the manager's native guarded job wrapper, avoiding the installed manager's
 missing `bus` binding. No manager update is needed. Scan status reports inspected

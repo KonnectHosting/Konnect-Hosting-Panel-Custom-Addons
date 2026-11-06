@@ -1,4 +1,4 @@
-# GMod Toolkit 1.1.2 verification
+# GMod Toolkit 1.2.0 verification
 
 Contract: Addon Manager 2.0.1 source 5a899b28aa80b08f3ab8a5cbae3e5315cc5c2563;
 repository baseline 43927ae7c65e4e8578f9cfd63ffb4d62e60f1ad5. Runtime tests
@@ -8,18 +8,31 @@ configuration was modified.
 
 ## Executed checks
 
+- Dedicated upload-root regression: existing Wings API calls read only `/fastdl`
+  (plus parent metadata), and never read `garrysmod/` assets. Ordinary-directory,
+  symlink, traversal and transfer checks cover the root and its ancestors. Folder
+  preparation uses existing file API calls, requires write permissions, preserves
+  uploads and game files, and is idempotent. A 2,500-file upload set is enumerated;
+  this checks scanning, not live large-file throughput.
+- Source-location upgrade: old unfinished previews cannot be published or resumed
+  from the former root; current published objects and URLs remain readable.
+- Independent Workshop status returns backups without invoking FastDL. Neither
+  the customer pages, generated Lua nor status output contains mounting guidance.
+  FastDL and Workshop are distinct named routes; the former umbrella is an
+  unnamed bookmark redirect, which Arix excludes from Missing Links.
+
 - Reproduced the reported missing settings/app:telemetry:uuid failure with 1.1.0
   and the original 2.0.1 probe in a networkless, read-only container with an empty
-  temporary SQLite database. Version 1.1.2 passes that unchanged probe: 2 handler
+  temporary SQLite database. Version 1.2.0 passes that unchanged probe: 2 handler
   classes, 2 extension routes, 1 page, 0 schedules; Laravel boot and PHP lint pass.
   tests/isolated-probe.py makes this regression repeatable.
 - The repository's generic probe now disables host telemetry only inside its
   synthetic process so legitimate scheduled addons can be inspected without
   production settings. The previous scheduled 1.1.0 candidate passes the fixed
-  probe (1 schedule). The delivered 1.1.2 addon does not require this manager patch.
+  probe (1 schedule). The delivered 1.2.0 addon does not require this manager patch.
 
 - SDK validation, PHP syntax, source/fragment hashes and SDK export round trip.
-- 29 Panel/Workshop/FastDL tests: nested/cyclic Workshop collections, safe Lua,
+- 34 Panel/Workshop/FastDL tests: nested/cyclic Workshop collections, safe Lua,
   hostile IDs/links, wrong-game/private items, real Panel owner/subuser policy,
   CSRF, two-factor, server membership/suspension, Lua updates via the actual
   Wings write contract, backup/restore, stale previews and enabled-version guards.
@@ -52,15 +65,18 @@ configuration was modified.
   install, same-ID update, disable, re-enable, delete, retained private data and
   source drift failure. Fixture build/verifier callbacks are test doubles, not
   production isolation attestations.
+  The actual published 1.1.2 archive was also installed and upgraded to 1.2.0
+  in all three variants, checking reconstruction of the changed route patches
+  and the additional independent page files.
 - Stock native frontend: full TypeScript, targeted ESLint and production webpack
-  build were rerun for 1.1.2. Previous Arix before/after type comparisons introduced zero errors; full Arix
+  build were rerun for 1.2.0. Arix before/after type comparisons introduced zero errors; full Arix
   compilation is not claimed because the root dependency set omits theme
   dependencies (92/100 existing baseline errors). The live host must retain its
   existing matched frozen theme dependencies.
 - Full repository archive extraction and package-folder selection through the
   matching SDK, including the standalone publication root. Public GitHub commit
   identity and live archive availability are checked before delivery.
-  Publication: 4b1c932541b99412fda3ae2d27f078e4e03ac032.
+  Publication: 164aadb9d6235566dc7de1b34e96788ed901f49a.
 
 ## Live checks still outside this environment
 

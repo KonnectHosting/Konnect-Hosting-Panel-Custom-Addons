@@ -1,7 +1,7 @@
-# GMod Toolkit 1.1.2
+# GMod Toolkit 1.2.0
 
 A single Panel addon: install through the existing Addon Manager dialog, then
-use the GMod Toolkit server tab. It needs **no node changes or companion
+use the separate FastDL and Workshop server pages. It needs **no node changes or companion
 installation**. GMod eggs are recognized automatically. The manager's native
 frontend build and existing Wings/queue integrations do the work.
 
@@ -10,7 +10,7 @@ frontend build and existing Wings/queue integrations do the work.
 Paste this URL into **Addon Manager → Install addon → GitHub package URL**:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/4b1c932541b99412fda3ae2d27f078e4e03ac032
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/164aadb9d6235566dc7de1b34e96788ed901f49a
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -18,27 +18,27 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.1.2.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.2.0.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
 use **GMod Toolkit → Update**, the same addon ID `gmod.toolkit` and this version's immutable package URL.
 Keep the existing private state; the manager reconstructs source and retains data.
 
-On Arix, add **GMod Toolkit** from the Editor's **Missing Links** list to a
-category restricted to the GMod eggs and save. The route is `/gmod-toolkit`.
+On Arix, remove the old GMod Toolkit sidebar entry. From **Missing Links**, add
+**FastDL** (`/fastdl`) and **Workshop** (`/workshop`) to your conditional Garry's
+Mod category and save. The old `/gmod-toolkit` URL redirects to Workshop.
 
-Version 1.1.2 fixes valid collections being rejected when Steam omits the
-published-file type field, and fixes FastDL enqueueing on the installed manager
-without requiring a separate manager update. The customer page now provides
-upload folders, Files links, preview/publish instructions, queue progress,
-a labeled download URL and copy buttons for the URL and server.cfg settings.
+Version 1.2.0 publishes only explicitly uploaded assets from
+`/home/container/fastdl/`. The customer FastDL page can create the upload folders
+through the existing Wings file connection. Game directories are left alone.
+FastDL and Workshop have independent pages and status requests; the mounting
+explanation and Startup link have been removed.
 
 ## Customer tools
 
 - **Workshop:** collection IDs/links, recursive nested collections, duplicate and
   cycle removal, GMod app validation, item/Lua previews, private backups, previewed
-  restoration and stale-edit rejection. Server mounting remains a separate
-  existing Startup operation; no Steam credentials enter Lua or FastDL.
+  restoration and stale-edit rejection. No Steam credentials enter Lua or FastDL.
 - **FastDL:** private snapshots copied through Wings; asynchronous progress;
   exact added/changed/removed previews; `.bz2` compression and raw fallback;
   complete-generation publication; random URLs with rotate/revoke controls.
@@ -57,13 +57,28 @@ Customers copy the generated `sv_downloadurl` setting into server.cfg. A stopped
 GMod process does not interrupt published downloads. The node FQDN is not used:
 serving custom HTTP paths there would require changes the node owner controls.
 
-Upload extracted assets through Files/SFTP to `/garrysmod/maps/`, `materials/`,
-`models/`, `sound/`, `particles/` or `resource/fonts/` beneath the server root.
-Preserve subfolders and upload the raw files; compression is automatic. Create
-a preview, review it, then publish. The URL becomes available after the first
-successful publication. Copy the provided settings into
-`/garrysmod/cfg/server.cfg`, then restart the game server or apply the settings
-in its console. Repeat preview/publication after changing assets.
+Open **FastDL → Prepare upload folders**, then upload extracted assets using
+Files/SFTP under the container's `fastdl/` directory:
+
+```text
+/home/container/fastdl/maps/
+/home/container/fastdl/materials/
+/home/container/fastdl/models/
+/home/container/fastdl/sound/
+/home/container/fastdl/particles/
+/home/container/fastdl/resource/fonts/
+```
+
+Keep game-relative names: `fastdl/maps/rp_example.bsp` is published at
+`<your-download-url>/maps/rp_example.bsp`. Compression is automatic. Preview the
+uploaded files, review the changes, then publish. The unique URL appears after
+the first successful publication, with copy buttons for the URL and settings
+for `/garrysmod/cfg/server.cfg`. Restart the game server or apply the settings
+in its console. Repeat preview/publication after changing uploads.
+
+Updating preserves previous publications, their URLs and Workshop backups.
+Unfinished previews prepared from the old game directory are retired so a new
+preview always uses `fastdl/`. Existing game files are never moved or scanned.
 
 Only approved game assets are public. The addon never aliases /home/container,
 serves game files on demand, exposes Lua/cfg/archives, or installs a web server in
@@ -74,7 +89,7 @@ private snapshot is the object the customer previews and approves.
 
 ## Isolated validation compatibility
 
-Version 1.1.2 has no registered scheduler hook. Authorized status polling resumes
+Version 1.2.0 has no registered scheduler hook. Authorized status polling resumes
 only that server's interrupted work, with throttling and fresh worker permission
 checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
 starts telemetry registration, which queries a settings table absent from the
@@ -130,8 +145,8 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.1.2.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.1.2.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.2.0.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.2.0.zip.sha256)
 ```
 
 The original deployed probe is covered by an executable regression (a full Git

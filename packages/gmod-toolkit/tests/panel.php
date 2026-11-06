@@ -164,6 +164,8 @@ class FakeFastdl extends Fastdl {
     public array $calls = [];
     public function __construct() {}
     public function preview(Server $server, int $actor): array { $this->calls[] = [$server->uuid, $actor, 'preview']; return ['status' => 'running']; }
+    public function prepare(Server $server): array { $this->calls[] = [$server->uuid, 'prepare']; return ['root' => '/fastdl']; }
+    public function info(Server $server, int $actor): array { $this->calls[] = [$server->uuid, $actor, 'info']; return ['url' => null]; }
 }
 $files = new MemoryWings(); $fakeFastdl = new FakeFastdl();
 $controller = new ToolkitController($access, $state, $files, $workshop, $fakeFastdl);
@@ -187,9 +189,20 @@ test('FastDL calls are permission checked before publishing', function () use ($
     $sub->permissions = ['file.read', 'file.read-content'];
     reject(fn () => $controller->fastdl(requestFor($stranger), $server, 'preview'), 403);
     reject(fn () => $controller->fastdl(requestFor($reader), $server, 'publish'), 403);
+    reject(fn () => $controller->fastdl(requestFor($reader), $server, 'prepare'), 403);
     same([], $fakeFastdl->calls);
     $controller->fastdl(requestFor($reader), $server, 'preview');
     same([[$server->uuid, 43, 'preview']], $fakeFastdl->calls);
+});
+test('independent Workshop status never starts FastDL work and mounting guidance is removed', function () use ($controller, $server, $owner, $reader, $fakeFastdl) {
+    $fakeFastdl->calls = [];
+    $workshop = $controller->workshopStatus(requestFor($reader), $server)->getData(true);
+    same([], $fakeFastdl->calls); same(false, isset($workshop['mounting'])); same(false, isset($workshop['fastdl']));
+    same(true, isset($workshop['backups'], $workshop['target']));
+    $fastdl = $controller->fastdlStatus(requestFor($reader), $server)->getData(true);
+    same(['fastdl' => ['url' => null]], $fastdl);
+    $result = $controller->fastdl(requestFor($owner), $server, 'prepare')->getData(true);
+    same('/fastdl', $result['root']); same([$server->uuid, 'prepare'], end($fakeFastdl->calls));
 });
 test('existing membership and suspension middleware is retained', function () use ($server, $owner, $stranger) {
     $middleware = new \Pterodactyl\Http\Middleware\Api\Client\Server\AuthenticateServerAccess();
@@ -225,13 +238,13 @@ test('enabled-version guard rejects stale routes after disable/update', function
     $path = $host->stateRoot . '/registry.json';
     if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'), true);
-    $record = ['version' => '1.1.2', 'manifest' => $manifest, 'enabled' => true];
+    $record = ['version' => '1.2.0', 'manifest' => $manifest, 'enabled' => true];
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     same('ok', (new Enabled())->handle(Request::create('/test'), fn () => 'ok'));
     $record['enabled'] = false;
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     reject(fn () => (new Enabled())->handle(Request::create('/test'), fn () => 'bad'), 404);
-    $record['enabled'] = true; $record['version'] = $record['manifest']['version'] = '1.2.0';
+    $record['enabled'] = true; $record['version'] = $record['manifest']['version'] = '1.3.0';
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     reject(fn () => (new Enabled())->handle(Request::create('/test'), fn () => 'bad'), 404);
 });

@@ -8,7 +8,7 @@
     @if(session('status'))<div class="alert alert-success">{{ session('status') }}</div>@endif
     <div class="box box-primary"><div class="box-body">
         <h3>Enable customer tools for Garry's Mod eggs</h3>
-        <p>GMod eggs are recognized automatically by name/startup. This optional override lets you choose custom eggs. Customer operations require file read permissions; changes also require file create and update. This addon expects the game in /home/container/garrysmod.</p>
+        <p>GMod eggs are recognized automatically by name/startup. This optional override lets you choose custom eggs. Customer operations require file read permissions; changes also require file create and update. Workshop Lua uses /home/container/garrysmod. FastDL publishes only from /home/container/fastdl.</p>
         <form method="post" action="/admin/addon-manager/extensions/gmod.toolkit/settings/save">
             @csrf
             <label style="display:block"><input type="checkbox" name="automatic" value="1" @if(!array_key_exists('eggs', $settings)) checked @endif> Automatically recognize GMod eggs (default)</label>

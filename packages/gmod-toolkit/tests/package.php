@@ -11,10 +11,12 @@ use AddonManager\Storage\Files;
 use function AddonManager\Tests\{check, host, operation, same, temporary, write};
 
 $package = dirname(__DIR__) . '/addon';
+$previousArchive = isset($argv[1]) ? realpath($argv[1]) : null;
+if (isset($argv[1]) && !$previousArchive) { throw new RuntimeException('Previous public package archive is missing.'); }
 $manifest = PackageValidator::validate($package);
 same([], $manifest['extensions']['schedules'] ?? [], 'This addon must install without resolving the host scheduler.');
 foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'] as $variant => $prefix) {
-    temporary(function (string $root) use ($repo, $package, $manifest, $variant, $prefix): void {
+    temporary(function (string $root) use ($repo, $package, $manifest, $variant, $prefix, $previousArchive): void {
         $panel = $root . '/panel';
         foreach ($manifest['patches'] as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];
@@ -35,7 +37,11 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
         $manager->initialize(host());
         $fixture = ['manager' => $manager, 'panel' => $panel, 'state' => $root . '/state'];
         write($panel . '/storage/app/gmod-toolkit/backups-test.json', '{"retained":true}');
-        operation($fixture, 'install', ['packageRoot' => $package]);
+        if ($previousArchive) {
+            $previous = (new \AddonManager\Core\ArchiveExtractor())->extract($previousArchive, $root . '/previous');
+            operation($fixture, 'install', ['packageRoot' => $previous]);
+            operation($fixture, 'update', ['addonId' => 'gmod.toolkit', 'packageRoot' => $package]);
+        } else { operation($fixture, 'install', ['packageRoot' => $package]); }
         foreach ($manifest['patches'] as $patch) {
             $bytes = file_get_contents($panel . '/' . $patch['target']);
             same(1, substr_count($bytes, file_get_contents($package . '/' . $patch['replace'])));
@@ -43,14 +49,14 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
         foreach ($manifest['files'] as $file) { check(is_file($panel . '/' . $file['target']), 'Payload missing after installation.'); }
         $update = $root . '/update';
         Files::copyInventory($package, $update, Files::inventory($package));
-        $next = $manifest; $next['version'] = '1.1.3';
-        $enabled = str_replace("'1.1.2'", "'1.1.3'", file_get_contents($update . '/payload/Enabled.php'));
+        $next = $manifest; $next['version'] = '1.2.1';
+        $enabled = str_replace("'1.2.0'", "'1.2.1'", file_get_contents($update . '/payload/Enabled.php'));
         write($update . '/payload/Enabled.php', $enabled);
         foreach ($next['files'] as &$file) { if ($file['source'] === 'payload/Enabled.php') { $file['sha256'] = hash('sha256', $enabled); } }
         unset($file);
         write($update . '/manifest.json', json_encode($next));
         operation($fixture, 'update', ['addonId' => 'gmod.toolkit', 'packageRoot' => $update]);
-        same('1.1.3', $manager->registry()['addons']['gmod.toolkit']['version']);
+        same('1.2.1', $manager->registry()['addons']['gmod.toolkit']['version']);
         operation($fixture, 'disable', ['addonId' => 'gmod.toolkit']);
         foreach ($manifest['patches'] as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];
@@ -69,6 +75,6 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
         operation($fixture, 'install', ['packageRoot' => $package], 'failed');
         same('Changed host source', file_get_contents($panel . '/' . $target));
         same([], $manager->registry()['addons']);
-        echo "PASS $variant: install, update, disable, re-enable, delete, private data retention, drift failure\n";
+        echo "PASS $variant: " . ($previousArchive ? 'previous publication upgrade, ' : '') . "install, update, disable, re-enable, delete, private data retention, drift failure\n";
     });
 }

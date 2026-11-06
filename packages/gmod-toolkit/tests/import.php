@@ -15,6 +15,6 @@ try {
     $folder = ($argv[2] ?? '') === '-' ? null : 'packages/gmod-toolkit/addon';
     $package = (new ArchiveExtractor())->extract($archive, $temp . '/extracted', $folder);
     $manifest = PackageValidator::validate($package);
-    if ($manifest['id'] !== 'gmod.toolkit' || $manifest['version'] !== '1.1.2') { throw new RuntimeException('Unexpected package identity.'); }
+    if ($manifest['id'] !== 'gmod.toolkit' || $manifest['version'] !== '1.2.0') { throw new RuntimeException('Unexpected package identity.'); }
     echo json_encode(['importable' => true, 'id' => $manifest['id'], 'version' => $manifest['version'], 'archiveBytes' => filesize($archive)], JSON_THROW_ON_ERROR) . "\n";
 } finally { \AddonManager\Tests\remove($temp); }

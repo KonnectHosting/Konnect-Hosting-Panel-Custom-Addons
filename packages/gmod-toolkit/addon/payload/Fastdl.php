@@ -14,7 +14,7 @@ use Symfony\Component\Process\Process;
 
 class Fastdl
 {
-    public const VERSION = '1.1.2';
+    public const VERSION = '1.2.0';
     private Closure $enqueue;
 
     public function __construct(private State $state, private AssetSource $source, private Access $access, ?Closure $enqueue = null)
@@ -84,6 +84,11 @@ class Fastdl
             'changed' => array_values(array_filter(array_keys($new), static fn ($path) => isset($old[$path]) && $new[$path]['sha256'] !== $old[$path]['sha256']))];
     }
 
+    public function prepare(Server $server): array
+    {
+        return $this->state->locked('fastdl-source-' . $server->uuid, fn () => $this->source->prepare($server));
+    }
+
     public function preview(Server $server, int $actor): array
     {
         if (in_array(config('queue.default'), ['sync', 'null'], true)) { throw new RuntimeException('FastDL requires the Panel\'s existing asynchronous queue worker.'); }
@@ -93,6 +98,7 @@ class Fastdl
             if (isset($r['job']['snapshot']) && $r['job']['snapshot'] !== $r['generation']) { $this->state->removeDirectory($r['job']['snapshot']); }
             $id = bin2hex(random_bytes(32));
             $r['job'] = ['id' => $id, 'server' => $server->id, 'actor' => $actor, 'status' => 'running', 'phase' => 'scan',
+                'sourceRoot' => AssetSource::ROOT,
                 'dirs' => [''], 'entries' => [], 'manifest' => [], 'bytes' => 0, 'visited' => 0, 'skipped' => 0, 'cursor' => 0,
                 'sequence' => 0, 'attempts' => 0, 'updated' => time(), 'progressed' => time(), 'expires' => time() + 3600, 'revision' => $r['revision'],
                 'message' => '', 'snapshot' => 'fastdl-snapshot-' . $server->uuid . '-' . $id];
@@ -109,7 +115,7 @@ class Fastdl
         $job = $this->state->locked($this->key($server->uuid), function () use ($server, $actor, $preview) {
             $r = $this->record($server->uuid); $job = $r['job'] ?? [];
             abort_unless(($job['status'] ?? null) === 'preview-ready' && $job['id'] === $preview && $job['actor'] === $actor
-                && $job['expires'] >= time() && $job['revision'] === $r['revision'], 409, 'Preview expired, changed, or belongs to another user.');
+                && ($job['sourceRoot'] ?? null) === AssetSource::ROOT && $job['expires'] >= time() && $job['revision'] === $r['revision'], 409, 'Preview expired, changed, or belongs to another user.');
             if (!is_executable('/usr/bin/python3') || !is_file(__DIR__ . '/compress.py')) { throw new RuntimeException('The Panel\'s Python 3 runtime is unavailable.'); }
             $job['status'] = 'running'; $job['phase'] = 'compress'; $job['cursor'] = 0; $job['updated'] = time(); $job['progressed'] = time(); $job['expires'] = time() + 3600;
             ++$job['sequence']; $job['attempts'] = 0; $r['job'] = $job;
@@ -152,6 +158,7 @@ class Fastdl
             if (($job['id'] ?? null) !== ($payload['job'] ?? null) || ($job['sequence'] ?? null) !== ($payload['sequence'] ?? null) || ($job['status'] ?? '') !== 'running') { return; }
             try {
                 if ($job['actor'] !== $actor->id || $job['server'] !== $server->id || $job['revision'] !== $r['revision']) { throw new RuntimeException('FastDL operation was replaced.'); }
+                if (($job['sourceRoot'] ?? null) !== AssetSource::ROOT) { throw new RuntimeException('The upload location changed to /fastdl. Create a new preview from that folder.'); }
                 $this->access->checkUser($actor, $server, $job['phase'] === 'compress'); $server->validateCurrentState();
                 if (++$job['attempts'] > 3 || $job['expires'] < time()) { throw new RuntimeException('FastDL operation expired or exceeded its retry limit. Preview again.'); }
                 $job['updated'] = time(); $r['job'] = $job; $this->state->write($this->key($server->uuid), $r);
@@ -258,7 +265,9 @@ class Fastdl
     {
         $r = $this->record($uuid); $job = $r['job'] ?? null;
         if (!$job) { return; }
-        if (in_array($job['status'], ['running', 'preview-ready'], true) && $job['expires'] < time()) {
+        if (in_array($job['status'], ['running', 'preview-ready'], true) && ($job['sourceRoot'] ?? null) !== AssetSource::ROOT) {
+            $this->fail(['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence']], 'FastDL now uses /fastdl. Upload assets there and create a new preview. Existing published downloads are retained.');
+        } elseif (in_array($job['status'], ['running', 'preview-ready'], true) && $job['expires'] < time()) {
             $this->fail(['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence']], $job['status'] === 'running'
                 ? 'FastDL timed out. The host should check the existing Panel queue worker before you retry.' : 'Preview expired.');
         } elseif ($job['status'] === 'running' && $job['updated'] < time() - 90) {

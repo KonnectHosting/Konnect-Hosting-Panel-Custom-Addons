@@ -3,7 +3,9 @@
     // GMod Toolkit: retains the enclosing authenticated, per-server middleware.
     Route::prefix('/gmod-toolkit')->middleware(\Pterodactyl\Addons\GmodToolkit\Enabled::class)->group(function () {
         Route::get('/', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'status']);
+        Route::get('/workshop', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'workshopStatus']);
+        Route::get('/fastdl', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdlStatus']);
         Route::post('/workshop/preview', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'preview']);
         Route::post('/workshop/apply', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'apply']);
-        Route::post('/fastdl/{action}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdl'])->where('action', 'preview|publish|rotate|revoke');
+        Route::post('/fastdl/{action}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdl'])->where('action', 'prepare|preview|publish|rotate|revoke');
     });

@@ -24,8 +24,20 @@ final class ToolkitController
         return $this->reply(function () use ($request, $server) {
             $fastdl = $this->fastdl->info($server, $request->user()->id);
             return ['fastdl' => $fastdl, 'backups' => array_map(static fn ($entry) => ['id' => $entry['id'], 'created' => $entry['created']], $this->state->backups($server->uuid)),
-                'target' => WingsFiles::LUA, 'mounting' => 'Server mounting uses +host_workshop_collection COLLECTION_ID in the egg startup. It is independent of resource.AddWorkshop client downloads. Configure any Steam API key privately in the egg, never in this Lua or FastDL.'];
+                'target' => WingsFiles::LUA];
         });
+    }
+
+    public function workshopStatus(Request $request, Server $server): mixed
+    {
+        $this->access->check($request, $server);
+        return $this->reply(fn () => ['backups' => array_map(static fn ($entry) => ['id' => $entry['id'], 'created' => $entry['created']], $this->state->backups($server->uuid)), 'target' => WingsFiles::LUA]);
+    }
+
+    public function fastdlStatus(Request $request, Server $server): mixed
+    {
+        $this->access->check($request, $server);
+        return $this->reply(fn () => ['fastdl' => $this->fastdl->info($server, $request->user()->id)]);
     }
 
     public function preview(Request $request, Server $server): mixed
@@ -68,16 +80,17 @@ final class ToolkitController
             }
             $this->files->write($server, $preview['lua']);
             $this->state->write('preview-' . $server->uuid, []);
-            return ['message' => 'Workshop client-download Lua saved. Restart the game server when ready; server mounting was not changed.'];
+            return ['message' => 'Workshop client-download Lua saved. Restart the game server when ready.'];
         }));
     }
 
     public function fastdl(Request $request, Server $server, string $action): mixed
     {
-        abort_unless(in_array($action, ['preview', 'publish', 'rotate', 'revoke'], true), 404);
+        abort_unless(in_array($action, ['prepare', 'preview', 'publish', 'rotate', 'revoke'], true), 404);
         $this->access->check($request, $server, $action !== 'preview');
         $data = $request->validate(['preview' => ($action === 'publish' ? 'required|' : 'sometimes|') . 'string|regex:/^[a-f0-9]{64}$/']);
         return $this->reply(fn () => match ($action) {
+            'prepare' => $this->fastdl->prepare($server),
             'preview' => $this->fastdl->preview($server, $request->user()->id),
             'publish' => $this->fastdl->publish($server, $request->user()->id, $data['preview']),
             'rotate' => $this->fastdl->rotate($server, false),

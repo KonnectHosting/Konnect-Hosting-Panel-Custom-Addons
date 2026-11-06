@@ -211,19 +211,38 @@ test('enqueue failures leave a retryable failure rather than a permanently runni
 class AssetRepositoryFixture extends FakeWingsRepository {
     public bool $oversized = false;
     public bool $oversizedListing = false;
+    public bool $rootLink = false;
+    public bool $innerLink = false;
+    public array $requests = [];
+    public array $created = [];
+    public array $directories = [
+        '/' => [['name' => 'fastdl', 'mode' => 'drwxr-xr-x'], ['name' => 'garrysmod', 'mode' => 'drwxr-xr-x']],
+        '/fastdl' => [['name' => 'maps', 'mode' => 'drwxr-xr-x']],
+        '/fastdl/maps' => [['name' => 'test.bsp', 'mode' => '-rw-r--r--', 'size' => 8, 'modified' => 'fixed']],
+        '/garrysmod/maps' => [['name' => 'unrelated.bsp', 'mode' => '-rw-r--r--', 'size' => 8, 'modified' => 'fixed']],
+    ];
+    public function createDirectory(string $name, string $path): \Psr\Http\Message\ResponseInterface {
+        $this->created[] = [$name, $path];
+        $this->directories[$path][] = ['name' => $name, 'mode' => 'drwxr-xr-x'];
+        $this->directories[rtrim($path, '/') . '/' . $name] = [];
+        return new \GuzzleHttp\Psr7\Response(204);
+    }
     public function getHttpClient(array $headers = []): \GuzzleHttp\Client {
         return new \GuzzleHttp\Client(['handler'=>function($request,$options){
             parse_str($request->getUri()->getQuery(),$query);
+            $this->requests[] = $query['file'] ?? $query['directory'] ?? '';
             if (str_ends_with($request->getUri()->getPath(),'/files/contents')) {
+                same('/fastdl/maps/test.bsp', $query['file']);
                 return \GuzzleHttp\Promise\Create::promiseFor(new \GuzzleHttp\Psr7\Response(200,['Content-Length'=>'1'],$this->oversized?str_repeat('X',1024):'VBSP map'));
             }
             if($this->oversizedListing) return \GuzzleHttp\Promise\Create::promiseFor(new \GuzzleHttp\Psr7\Response(200,[],str_repeat('X',4194305)));
-            $rows=match($query['directory']??'') {
-                '/'=>[['name'=>'garrysmod','mode'=>'drwxr-xr-x']],
-                '/garrysmod'=>[['name'=>'maps','mode'=>'drwxr-xr-x']],
-                '/garrysmod/maps'=>[['name'=>'test.bsp','mode'=>'-rw-r--r--','size'=>8,'modified'=>'fixed','symlink'=>$this->link]],
-                default=>[],
-            };
+            $path = $query['directory'] ?? ''; $rows = $this->directories[$path] ?? [];
+            foreach ($rows as &$row) {
+                if (($path === '/' && $row['name'] === 'fastdl' && $this->rootLink)
+                    || ($path === '/fastdl' && $row['name'] === 'maps' && $this->innerLink)
+                    || ($path === '/fastdl/maps' && $this->link)) { $row['symlink'] = true; }
+            }
+            unset($row);
             return \GuzzleHttp\Promise\Create::promiseFor(new \GuzzleHttp\Psr7\Response(200,[],json_encode($rows)));
         }]);
     }
@@ -237,16 +256,63 @@ test('existing Wings API streams assets with size, ancestry and link checks',fun
     $repository->oversizedListing=true;reject(fn()=>$source->listing($server,''));
 });
 
+test('only dedicated FastDL uploads are read; game folders and linked roots are excluded', function () use ($server, $panel) {
+    $repository = new AssetRepositoryFixture(); $source = new AssetSource($repository);
+    $state = new State($panel . '/storage/app/dedicated-root-' . bin2hex(random_bytes(6)));
+    $state->write('settings', ['eggs' => [1]]); $queue = new ArrayObject();
+    $engine = new Fastdl($state, $source, new Access($state), function ($payload) use ($queue) { $queue[] = $payload; });
+    $engine->preview($server, 42);
+    foreach ($queue as $payload) { $engine->handle($payload); }
+    $info = $engine->info($server, 42);
+    same('preview-ready', $info['job']['status']); same(['maps/test.bsp'], $info['preview']['added']);
+    foreach ($repository->requests as $path) { same(true, $path === '/' || $path === '/fastdl' || str_starts_with($path, '/fastdl/')); }
+    $repository->rootLink = true; reject(fn () => $source->listing($server, ''));
+    reject(fn () => $source->prepare($server)); same([], $repository->created);
+    $repository->rootLink = false; $repository->innerLink = true;
+    reject(fn () => $source->listing($server, 'maps')); reject(fn () => $source->prepare($server));
+    foreach (['../garrysmod', '/garrysmod', 'maps/../cfg', 'maps//test'] as $relative) { reject(fn () => $source->listing($server, $relative)); }
+});
+
+test('upload folders are created through existing Wings calls without touching game assets', function () use ($server) {
+    $repository = new AssetRepositoryFixture();
+    $repository->directories = ['/' => [['name' => 'garrysmod', 'mode' => 'drwxr-xr-x']], '/garrysmod' => [['name' => 'unrelated.bsp', 'mode' => '-rw-r--r--']]];
+    $source = new AssetSource($repository); $result = $source->prepare($server);
+    same('/fastdl', $result['root']); same(8, count($repository->created));
+    same([['name' => 'unrelated.bsp', 'mode' => '-rw-r--r--']], $repository->directories['/garrysmod']);
+    $source->prepare($server); same(8, count($repository->created));
+    same(true, array_key_exists('/fastdl/resource/fonts', $repository->directories));
+    $repository->directories['/'][1] = ['name' => 'fastdl', 'mode' => '-rw-r--r--'];
+    reject(fn () => $source->prepare($server));
+});
+
+test('older unfinished previews are retired while existing published downloads remain available', function () use ($server) {
+    [$state, $source, $queue, $engine, $drain] = fastdlFixture(); $token = published($engine, $drain);
+    $preview = readyPreview($engine, $drain); $key = 'fastdl-server-' . $server->uuid;
+    $r = $state->read($key); unset($r['job']['sourceRoot']); $state->write($key, $r);
+    reject(fn () => $engine->publish($server, 42, $preview['preview']), 409);
+    $info = $engine->info($server, 42); same('failed', $info['job']['status']);
+    same('VBSP map', file_get_contents($engine->download($token, 'maps/test.bsp')['path']));
+    $preview = readyPreview($engine, $drain); same(2, $preview['files']);
+});
+
+test('thousands of explicitly uploaded assets are enumerated without reading game files', function () use ($server, $owner) {
+    [$state, $source, $queue, $engine, $drain] = fastdlFixture(); $source->files = [];
+    for ($i = 0; $i < 2500; ++$i) { $source->files['materials/test' . $i . '.vtf'] = 'VTF'; }
+    $engine->preview($server, 42);
+    for ($i = 0; $i < 2; ++$i) { $engine->step($server, $owner, $queue[$i]); }
+    $info = $engine->info($server, 42); same(2500, $info['job']['total']); same(0, $source->copies);
+});
+
 test('manager guarded jobs resolve fresh actors and use the existing queue contract',function()use($app,$panel,$server){
     [$state,$source,$queue,$engine,$drain]=fastdlFixture();$app->instance(Fastdl::class,$engine);
     $manifest=json_decode(file_get_contents(dirname(__DIR__).'/addon/manifest.json'),true);
-    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.2','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.2.0','manifest'=>$manifest,'enabled'=>true]]]));
     $engine->preview($server,42);
     $extensions=$app->make(\AddonManager\Laravel\ExtensionRegistry::class);$count=0;
     while(count($queue)){
         if(++$count>100)throw new RuntimeException('Unbounded guarded queue chain');
         $payload=$queue[0];$queue->offsetUnset(0);$queue->exchangeArray(array_values($queue->getArrayCopy()));
-        $extensions->runJob('gmod.toolkit','1.1.2','fastdl-step',$payload);
+        $extensions->runJob('gmod.toolkit','1.2.0','fastdl-step',$payload);
     }
     same('preview-ready',$engine->info($server,42)['job']['status']);
 });
@@ -284,7 +350,7 @@ test('anonymous HTTP FastDL is limited to enabled approved asset snapshots', fun
     $app->instance(Fastdl::class,$engine);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'),true);
     $registry = $panel . '/storage/app/addon-manager/registry.json';
-    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.2','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.2.0','manifest'=>$manifest,'enabled'=>true]]]));
     $kernel=$app->make(\Illuminate\Contracts\Http\Kernel::class);
     $request=\Illuminate\Http\Request::create('/fastdl/'.$token.'/maps/test.bsp','GET');
     $response=$kernel->handle($request); same(200,$response->getStatusCode()); same('application/octet-stream',$response->headers->get('Content-Type'));
