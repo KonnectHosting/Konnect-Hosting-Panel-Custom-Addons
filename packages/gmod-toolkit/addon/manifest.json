@@ -1,0 +1,131 @@
+{
+  "manifestVersion": 1,
+  "id": "gmod.toolkit",
+  "name": "GMod Toolkit",
+  "version": "1.0.0",
+  "description": "Workshop client Lua with previews/backups and node-local FastDL publishing with per-server permissions.",
+  "compatibility": {
+    "manager": "=2.0.1",
+    "php": ">=8.2 <9.0",
+    "panel": "=1.15.1"
+  },
+  "dependencies": [],
+  "incompatible": [],
+  "files": [
+    {
+      "source": "payload/Access.php",
+      "target": "app/Addons/GmodToolkit/Access.php",
+      "sha256": "1a88b0118b977d4ce42631a240aaefcd202b8e703aa2b9376fb07e92fb42da9d"
+    },
+    {
+      "source": "payload/AdminController.php",
+      "target": "app/Addons/GmodToolkit/AdminController.php",
+      "sha256": "a440257dc7ea60499e16ff73f8506e3ad91d3dacc1fda51d2fccc1ef04562b7a"
+    },
+    {
+      "source": "payload/Enabled.php",
+      "target": "app/Addons/GmodToolkit/Enabled.php",
+      "sha256": "9afa62f76bdef976193660c6b588b433a0a8b031d68429fb7638dfcb85ac9c6e"
+    },
+    {
+      "source": "payload/GmodToolkitContainer.tsx",
+      "target": "resources/scripts/components/server/gmodToolkit/GmodToolkitContainer.tsx",
+      "sha256": "c8347212b437556633a67a3afb4e7e41b824e8f3b5442ab296a3369984ddbc4b"
+    },
+    {
+      "source": "payload/NodeClient.php",
+      "target": "app/Addons/GmodToolkit/NodeClient.php",
+      "sha256": "d66a5603834e85e4f613471146b4b063efa9b8098712ba3f68007bb50d9a0be8"
+    },
+    {
+      "source": "payload/State.php",
+      "target": "app/Addons/GmodToolkit/State.php",
+      "sha256": "b3a8d346f93fc14bd1ff7af34ab91d13657c2aab37670f329b743d2e10444cde"
+    },
+    {
+      "source": "payload/ToolkitController.php",
+      "target": "app/Addons/GmodToolkit/ToolkitController.php",
+      "sha256": "507f37e0872a602ff45a8a76c56aa948ed6e3e2471aa079a2ee0fa49363af38b"
+    },
+    {
+      "source": "payload/WingsFiles.php",
+      "target": "app/Addons/GmodToolkit/WingsFiles.php",
+      "sha256": "ddc99e75268c8f3a9f386e96a4437183a24f2e1f995fdea36a764af61bdbfbe2"
+    },
+    {
+      "source": "payload/Workshop.php",
+      "target": "app/Addons/GmodToolkit/Workshop.php",
+      "sha256": "613198de75484cf0e0fba74546e9b2b333aa4083d0953cd34e0023236b51eb20"
+    },
+    {
+      "source": "payload/settings.blade.php",
+      "target": "resources/views/addons/gmod_toolkit/settings.blade.php",
+      "sha256": "0f1cb38a8a837d3b3f3767f07a0d4dfad28778992c812954f854cff4f7e345a8"
+    }
+  ],
+  "patches": [
+    {
+      "id": "client-api",
+      "target": "routes/api-client.php",
+      "owner": "baseline",
+      "find": "patches/client-api-find.txt",
+      "replace": "patches/client-api-replace.txt",
+      "beforeSha256": "238a0dad5ba3f468c66ad7841d40e6dba94f0f0c41804eed29f4d33bbc3c93bf",
+      "afterSha256": "6526d5ae63d52b9ccced2173077838a672248bedc7bf098a18ebbfc9ac73f158"
+    },
+    {
+      "id": "server-tab",
+      "target": "resources/scripts/routers/routes.ts",
+      "owner": "baseline",
+      "find": "patches/server-tab-find.txt",
+      "replace": "patches/server-tab-replace.txt",
+      "beforeSha256": "a1f96cede3d386c5a9e2662e43f719f7b766ffed298f8fb5305fa78195dba6f6",
+      "afterSha256": "299274da57019e018eec77b16a586ae30977b84dd3e3745a4b942d178d3717d7"
+    }
+  ],
+  "extensions": {
+    "pages": [
+      {
+        "id": "settings-page",
+        "path": "settings",
+        "title": "GMod Toolkit",
+        "view": "addons.gmod_toolkit.settings",
+        "permission": "admin"
+      }
+    ],
+    "menus": [
+      {
+        "id": "settings-menu",
+        "label": "GMod Toolkit",
+        "page": "settings-page"
+      }
+    ],
+    "routes": [
+      {
+        "id": "settings-save",
+        "path": "settings/save",
+        "method": "POST",
+        "handler": "Pterodactyl\\Addons\\GmodToolkit\\AdminController@save",
+        "permission": "admin"
+      },
+      {
+        "id": "node-provision",
+        "path": "nodes/provision",
+        "method": "POST",
+        "handler": "Pterodactyl\\Addons\\GmodToolkit\\AdminController@provision",
+        "permission": "admin"
+      }
+    ]
+  },
+  "database": {
+    "dataPolicy": "preserve",
+    "migrations": []
+  },
+  "build": {
+    "mode": "panel",
+    "profile": "panel-v1",
+    "outputs": [
+      "public/assets"
+    ]
+  }
+}

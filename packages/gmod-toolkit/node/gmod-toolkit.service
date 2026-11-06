@@ -1,0 +1,27 @@
+[Unit]
+Description=GMod Toolkit node FastDL publisher
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /opt/gmod-toolkit/gmod_toolkit_agent.py --config /etc/gmod-toolkit/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadOnlyPaths=/var/lib/pterodactyl/volumes
+ReadWritePaths=/var/lib/gmod-toolkit
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=512M
+CPUQuota=200%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

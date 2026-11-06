@@ -1,0 +1,9 @@
+    Route::get('/resources', Client\Servers\ResourceUtilizationController::class)->name('api:client:server.resources');
+
+    // GMod Toolkit: retains the enclosing authenticated, per-server middleware.
+    Route::prefix('/gmod-toolkit')->middleware(\Pterodactyl\Addons\GmodToolkit\Enabled::class)->group(function () {
+        Route::get('/', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'status']);
+        Route::post('/workshop/preview', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'preview']);
+        Route::post('/workshop/apply', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'apply']);
+        Route::post('/fastdl/{action}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdl'])->where('action', 'preview|publish|rotate|revoke');
+    });

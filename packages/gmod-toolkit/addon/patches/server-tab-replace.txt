@@ -1,0 +1,8 @@
+    server: [
+        {
+            path: '/gmod-toolkit',
+            permission: 'file.read-content',
+            name: 'GMod Toolkit',
+            component: lazy(() => import('@/components/server/gmodToolkit/GmodToolkitContainer')),
+            exact: true,
+        },
