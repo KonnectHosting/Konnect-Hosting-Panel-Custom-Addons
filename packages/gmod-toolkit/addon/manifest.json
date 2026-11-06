@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "gmod.toolkit",
   "name": "GMod Toolkit",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.",
   "compatibility": {
     "manager": "=2.0.1",
@@ -40,12 +40,12 @@
     {
       "source": "payload/Enabled.php",
       "target": "app/Addons/GmodToolkit/Enabled.php",
-      "sha256": "141a4f482487ac991d6ba48a866f0c5bf5ea87a269a312825976d4200e6f9009"
+      "sha256": "e9dffe916ab1bff95542730a76913c1fd9089578fd9bdaf4db48c831f3bdba5f"
     },
     {
       "source": "payload/Fastdl.php",
       "target": "app/Addons/GmodToolkit/Fastdl.php",
-      "sha256": "8d99a75d807b788b10f60e286283d979d8e9399c8bbe11fdf7405e544028ed13"
+      "sha256": "df03c212bd69bc6e8c537ec73b3e4192db4f0034ab7dc1147a471866ae89ae2a"
     },
     {
       "source": "payload/GmodToolkitContainer.tsx",
@@ -142,14 +142,6 @@
       {
         "id": "fastdl-step",
         "handler": "Pterodactyl\\Addons\\GmodToolkit\\Fastdl@handle",
-        "permission": "system"
-      }
-    ],
-    "schedules": [
-      {
-        "id": "fastdl-recover",
-        "handler": "Pterodactyl\\Addons\\GmodToolkit\\Fastdl@recover",
-        "frequency": "everyMinute",
         "permission": "system"
       }
     ]

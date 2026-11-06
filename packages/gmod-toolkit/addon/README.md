@@ -1,4 +1,4 @@
-# GMod Toolkit 1.1.0
+# GMod Toolkit 1.1.1
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
@@ -54,7 +54,7 @@ on the next request. Rotated/revoked URLs fail on the next request too.
 Private state is retained in `storage/app/gmod-toolkit` on disable/delete.
 Removing the addon reconstructs its routes/frontend through the manager; no
 separate service remains. Re-enabling may resume retained valid publications.
-Existing queue/scheduler services provide recovery; duplicate/stale queue steps
+Existing queue/status polling and queue retries provide recovery; duplicate/stale queue steps
 are ignored. Each step handles one directory or one asset. Limits: 128 MiB/file,
 2 GiB raw/server, 5000 files, 20,000 inspected entries, 4 MiB directory responses,
 one hour per preparation/publication, and 15 minutes to approve a finished
@@ -63,5 +63,5 @@ previews are cleaned automatically. Previous publications survive failed builds.
 
 This is a native Panel frontend package using the manager's panel-v1 profile.
 It adds no package-manager dependencies. The host must already have the working
-Panel queue/scheduler and its matched frozen frontend dependencies. See the
+Panel queue and its matched frozen frontend dependencies. See the
 source repository's verification record for executed tests and live-game checks.

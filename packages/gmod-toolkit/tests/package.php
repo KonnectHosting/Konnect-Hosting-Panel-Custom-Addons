@@ -12,6 +12,7 @@ use function AddonManager\Tests\{check, host, operation, same, temporary, write}
 
 $package = dirname(__DIR__) . '/addon';
 $manifest = PackageValidator::validate($package);
+same([], $manifest['extensions']['schedules'] ?? [], 'This addon must install without resolving the host scheduler.');
 foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'] as $variant => $prefix) {
     temporary(function (string $root) use ($repo, $package, $manifest, $variant, $prefix): void {
         $panel = $root . '/panel';
@@ -42,14 +43,14 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
         foreach ($manifest['files'] as $file) { check(is_file($panel . '/' . $file['target']), 'Payload missing after installation.'); }
         $update = $root . '/update';
         Files::copyInventory($package, $update, Files::inventory($package));
-        $next = $manifest; $next['version'] = '1.1.1';
-        $enabled = str_replace("'1.1.0'", "'1.1.1'", file_get_contents($update . '/payload/Enabled.php'));
+        $next = $manifest; $next['version'] = '1.1.2';
+        $enabled = str_replace("'1.1.1'", "'1.1.2'", file_get_contents($update . '/payload/Enabled.php'));
         write($update . '/payload/Enabled.php', $enabled);
         foreach ($next['files'] as &$file) { if ($file['source'] === 'payload/Enabled.php') { $file['sha256'] = hash('sha256', $enabled); } }
         unset($file);
         write($update . '/manifest.json', json_encode($next));
         operation($fixture, 'update', ['addonId' => 'gmod.toolkit', 'packageRoot' => $update]);
-        same('1.1.1', $manager->registry()['addons']['gmod.toolkit']['version']);
+        same('1.1.2', $manager->registry()['addons']['gmod.toolkit']['version']);
         operation($fixture, 'disable', ['addonId' => 'gmod.toolkit']);
         foreach ($manifest['patches'] as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];

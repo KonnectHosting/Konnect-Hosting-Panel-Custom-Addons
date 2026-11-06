@@ -12,7 +12,7 @@ use Symfony\Component\Process\Process;
 
 class Fastdl
 {
-    public const VERSION = '1.1.0';
+    public const VERSION = '1.1.1';
     private Closure $enqueue;
 
     public function __construct(private State $state, private AssetSource $source, private Access $access, ?Closure $enqueue = null)
@@ -42,6 +42,9 @@ class Fastdl
 
     public function info(Server $server, int $actor): array
     {
+        // Status requests are already authorized by the server controller. Resume
+        // only this server's stale work; no application-wide scheduler is needed.
+        $this->recover($server->uuid);
         $r = $this->record($server->uuid); $job = $r['job'] ?? null; $preview = null;
         if ($job && $job['status'] === 'preview-ready' && $job['actor'] === $actor && $job['expires'] >= time()) {
             $preview = $this->previewResult($r, $job);
@@ -229,18 +232,22 @@ class Fastdl
         });
     }
 
-    public function recover(): void
+    public function recover(string $uuid): void
     {
-        $keys = $this->state->keys('fastdl-server-'); sort($keys);
-        $cursor = $this->state->read('fastdl-recovery')['cursor'] ?? 0;
-        if ($cursor >= count($keys)) { $cursor = 0; }
-        foreach (array_slice($keys, $cursor, 25) as $key) {
-            $uuid = substr($key, strlen('fastdl-server-')); $r = $this->record($uuid); $job = $r['job'] ?? null;
-            if (!$job) { continue; }
-            if ($job['status'] === 'preview-ready' && $job['expires'] < time()) { $this->fail(['uuid' => $uuid, 'job' => $job['id']], 'Preview expired.'); }
-            elseif ($job['status'] === 'running' && $job['updated'] < time() - 90) { $this->dispatch($uuid, $job); }
+        $r = $this->record($uuid); $job = $r['job'] ?? null;
+        if (!$job) { return; }
+        if ($job['status'] === 'preview-ready' && $job['expires'] < time()) {
+            $this->fail(['uuid' => $uuid, 'job' => $job['id']], 'Preview expired.');
+        } elseif ($job['status'] === 'running' && $job['updated'] < time() - 90) {
+            $next = $this->state->locked($this->key($uuid), function () use ($uuid) {
+                $r = $this->record($uuid); $job = $r['job'] ?? null;
+                if (!$job || $job['status'] !== 'running' || $job['updated'] >= time() - 90) { return null; }
+                $r['job']['updated'] = time();
+                $this->state->write($this->key($uuid), $r);
+                return $r['job'];
+            });
+            if ($next) { $this->dispatch($uuid, $next); }
         }
-        $this->state->write('fastdl-recovery', ['cursor' => $cursor + 25]);
     }
 
     public function download(string $token, string $path): array

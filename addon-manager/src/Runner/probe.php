@@ -59,6 +59,11 @@ declare(strict_types=1);
             $app = require '/work/bootstrap/app.php';
             $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
             $kernel->bootstrap();
+            // Inspecting scheduled addon registrations resolves the Panel schedule.
+            // Its telemetry registration queries production settings even in testing.
+            // Disable that integration only in this synthetic, networkless process;
+            // the live application configuration and database are never mounted.
+            $app['config']->set('pterodactyl.telemetry.enabled', false);
             $app->make('router')->getRoutes();
             $extensionCount = 0;
             $routeCount = $pageCount = $eventCount = $scheduleCount = 0;

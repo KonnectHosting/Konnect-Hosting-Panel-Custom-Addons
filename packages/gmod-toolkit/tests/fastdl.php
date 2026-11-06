@@ -174,7 +174,9 @@ test('queued work rechecks permissions and recovers interrupted steps', function
     [$state, $source, $queue, $engine, $drain] = fastdlFixture();
     $engine->preview($server, 42); $queue->exchangeArray([]);
     $r = $state->read('fastdl-server-' . $server->uuid); $r['job']['updated'] = time()-120; $state->write('fastdl-server-' . $server->uuid,$r);
-    $engine->recover(); same(1,count($queue)); $drain(); same('preview-ready',$engine->info($server,42)['job']['status']);
+    $engine->info($server,42); same(1,count($queue));
+    $engine->info($server,42); same(1,count($queue)); // Polling does not flood the queue.
+    $drain(); same('preview-ready',$engine->info($server,42)['job']['status']);
     $preview = $engine->info($server,42)['preview']; $engine->publish($server,42,$preview['preview']);
     $server->owner_id = 999;
     $drain(); same('failed',$engine->info($server,42)['job']['status']); same(null,$engine->info($server,42)['url']);
@@ -213,13 +215,13 @@ test('existing Wings API streams assets with size, ancestry and link checks',fun
 test('manager guarded jobs resolve fresh actors and use the existing queue contract',function()use($app,$panel,$server){
     [$state,$source,$queue,$engine,$drain]=fastdlFixture();$app->instance(Fastdl::class,$engine);
     $manifest=json_decode(file_get_contents(dirname(__DIR__).'/addon/manifest.json'),true);
-    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.0','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.1','manifest'=>$manifest,'enabled'=>true]]]));
     $engine->preview($server,42);
     $extensions=$app->make(\AddonManager\Laravel\ExtensionRegistry::class);$count=0;
     while(count($queue)){
         if(++$count>100)throw new RuntimeException('Unbounded guarded queue chain');
         $payload=$queue[0];$queue->offsetUnset(0);$queue->exchangeArray(array_values($queue->getArrayCopy()));
-        $extensions->runJob('gmod.toolkit','1.1.0','fastdl-step',$payload);
+        $extensions->runJob('gmod.toolkit','1.1.1','fastdl-step',$payload);
     }
     same('preview-ready',$engine->info($server,42)['job']['status']);
 });
@@ -230,7 +232,7 @@ test('anonymous HTTP FastDL is limited to enabled approved asset snapshots', fun
     $app->instance(Fastdl::class,$engine);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'),true);
     $registry = $panel . '/storage/app/addon-manager/registry.json';
-    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.0','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.1.1','manifest'=>$manifest,'enabled'=>true]]]));
     $kernel=$app->make(\Illuminate\Contracts\Http\Kernel::class);
     $request=\Illuminate\Http\Request::create('/fastdl/'.$token.'/maps/test.bsp','GET');
     $response=$kernel->handle($request); same(200,$response->getStatusCode()); same('application/octet-stream',$response->headers->get('Content-Type'));

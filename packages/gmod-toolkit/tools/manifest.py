@@ -66,7 +66,7 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.1.0',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.1.1',
     'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,
@@ -77,7 +77,6 @@ manifest = {
             {'id': 'settings-save', 'path': 'settings/save', 'method': 'POST', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\AdminController@save', 'permission': 'admin'},
         ],
         'jobs': [{'id': 'fastdl-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@handle', 'permission': 'system'}],
-        'schedules': [{'id': 'fastdl-recover', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@recover', 'frequency': 'everyMinute', 'permission': 'system'}],
     },
     'database': {'dataPolicy': 'preserve', 'migrations': []},
     'build': {'mode': 'panel', 'profile': 'panel-v1', 'outputs': ['public/assets']},

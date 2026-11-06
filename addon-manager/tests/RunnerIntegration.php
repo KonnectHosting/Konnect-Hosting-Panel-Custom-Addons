@@ -272,6 +272,33 @@ PHP;
         same($before, Files::inventory($stage), 'Container validation changed staged files outside disposable runtime mounts');
     });
 
+    $runnerTest('scheduled extensions resolve against the empty synthetic database without telemetry settings', function () use ($registry, $root, $runner): void {
+        $stage = runnerStage($registry, $root, 'scheduled-extension');
+        $source = <<<'PHP'
+<?php
+namespace Pterodactyl\Addons\RunnerScheduleFixture;
+final class Probe {
+    public function __construct() {
+        if (config('pterodactyl.telemetry.enabled') !== false) throw new \RuntimeException('Synthetic telemetry was not disabled');
+        if (app('db')->connection()->getDriverName() !== 'sqlite' || app('db')->connection()->getSchemaBuilder()->hasTable('settings')) {
+            throw new \RuntimeException('Schedule validation must use an empty synthetic database');
+        }
+    }
+    public function handle(): void { throw new \RuntimeException('Validation must not execute scheduled handlers'); }
+}
+PHP;
+        $definition = runnerManifest('test.runner-schedule');
+        $definition['files'][] = fileDeclaration('payload/Probe.php', 'app/Addons/RunnerScheduleFixture/Probe.php', $source);
+        $definition['extensions'] = ['schedules' => [['id' => 'probe-schedule', 'handler' => 'Pterodactyl\\Addons\\RunnerScheduleFixture\\Probe@handle', 'frequency' => 'everyMinute', 'permission' => 'system']]];
+        $definition = ManifestValidator::validate($definition);
+        write($stage . '/app/Addons/RunnerScheduleFixture/Probe.php', $source);
+        $before = Files::inventory($stage);
+        $result = $runner->verifyStage($stage, [$definition], ['id' => 'scheduled-extension-empty-database']);
+        same(true, $result['checks']['passed']);
+        same(1, $result['checks']['schedules']);
+        same($before, Files::inventory($stage), 'Synthetic scheduler validation changed staged source');
+    });
+
     foreach ([false, true] as $changed) {
         $runnerTest($changed ? 'changed unused baseline PHP is linted and rejected' : 'unchanged unused baseline PHP is hash verified without blocking Laravel boot', function () use ($changed, $panel, $state, $registry, $root, $config): void {
             // The synthetic trusted snapshot is private to this case. Neither

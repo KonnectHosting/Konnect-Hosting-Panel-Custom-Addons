@@ -1,16 +1,16 @@
-# GMod Toolkit 1.1.0
+# GMod Toolkit 1.1.1
 
 A single Panel addon: install through the existing Addon Manager dialog, then
 use the GMod Toolkit server tab. It needs **no node changes or companion
 installation**. GMod eggs are recognized automatically. The manager's native
-frontend build and existing Wings/queue/scheduler integrations do the work.
+frontend build and existing Wings/queue integrations do the work.
 
 ## Install through the Panel
 
 Paste this URL into **Addon Manager → Install addon → GitHub package URL**:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/a30dfdfd7089db3eaf5c740709fb5cd82686da95
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/c71f810bc068026b48533b560fbbe4e21a927ca4
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -18,7 +18,7 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.1.0.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.1.1.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
 use the same addon ID `gmod.toolkit` and the next version's immutable package URL.
@@ -55,6 +55,15 @@ reported links and changed metadata are rejected and transfer lengths are bounde
 Wings remains responsible for its own filesystem containment. A hash-checked
 private snapshot is the object the customer previews and approves.
 
+## Isolated validation compatibility
+
+Version 1.1.1 has no registered scheduler hook. Authorized status polling resumes
+only that server's interrupted work, with throttling and fresh worker permission
+checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
+starts telemetry registration, which queries a settings table absent from the
+empty validation database. The addon installs with the unchanged probe; no live
+DB changes, manager hotfix or node changes are required.
+
 ## Runtime and lifecycle
 
 Targets Addon Manager **2.0.1**, Panel **1.15.1**, PHP **8.2/8.3**, with optional
@@ -72,8 +81,8 @@ retained for re-enable/update. Already-downloaded assets cannot be recalled.
 Queue work uses manager-guarded registrations and small JSON payloads. One step
 scans one directory, copies one file or compresses one file, within the existing
 worker timeout. Fresh actor permissions are checked at execution. Sequence
-numbers reject duplicate work; a guarded scheduled recovery retries interrupted
-steps and cleans expired previews. Failed publication preserves the old snapshot.
+numbers reject duplicate work; authorized server-status polling recovers interrupted
+steps and cleans expired previews when the tool is opened. Failed publication preserves the old snapshot.
 
 ## Development
 
@@ -104,6 +113,17 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.1.0.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.1.0.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.1.1.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.1.1.zip.sha256)
 ```
+
+The original deployed probe is covered by an executable regression (a full Git
+checkout provides the pinned 2.0.1 probe source):
+
+```sh
+python3 packages/gmod-toolkit/tests/isolated-probe.py --vendor=/path/to/disposable-panel/vendor
+```
+
+This boots the real candidate with an empty SQLite database, no network,
+read-only source/dependencies and no telemetry override. It verifies handler,
+route and view checks complete using the unchanged installed probe.
