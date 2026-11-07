@@ -1,4 +1,4 @@
-# GMod Toolkit 1.4.0
+# GMod Toolkit 1.5.0
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
@@ -8,34 +8,58 @@ Customers have separate **FastDL** (`/fastdl`), **Workshop** (`/workshop`) and
 new routes from the Editor's Missing Links list to your conditional Garry's Mod
 category, then save. The old `/gmod-toolkit` bookmark redirects to Workshop.
 
-Backdoor Scanner runs an asynchronous, static scan through the existing Wings
-file API and Panel queue. It reads installed addon, Lua, gamemode/data and
-Workshop-cache files, including plain and LZMA-compressed GMA archives. Findings
-include severity, file/member path, source line/context, rule and explanation.
-Customers can filter, show optional low-priority indicators, cancel, refresh and
-download the latest report. Results are private, retained across page loads and
-available only with both file.read and file.read-content permissions. Queued
-work rechecks the requesting user's permissions and server state.
+Backdoor Scanner checks known code locations: `/garrysmod/lua`, `addons`,
+`gamemodes`, `data`, `cfg` and `materials`. It never recursively searches the
+container root, FastDL, backups or engine trees. Asset-only map/model/sound/
+particle/resource/screenshot trees in addons and gamemodes are pruned; relevant
+material files remain included. It reads .lua/.txt/.cfg/.vmt/.json/.dat/.js.
+Loose files are inspected as directories are discovered, so later limits do not
+discard all progress. Overall server disk usage is not a scan-size limit.
 
-Rules cover network-to-Lua execution, HTTP execution callbacks, privilege grants,
-fixed-identity allow decisions, changed authorization functions, sensitive console
-commands, persistent script writes, encoded/indirect execution and historical
-channel indicators. Common global/debug access and HTTP requests are low priority.
-Legitimate admin frameworks and DRM can match; findings require manual review.
-No code being scanned is executed, no payload URL is contacted, and no server
-file is modified or deleted. No addon name or framework folder is blanket trusted.
+Packed addons are optional, off by default, and run after loose code. They include
+GMA and LZMA-alone Workshop archives from installed addon folders and the known
+`garrysmod/cache/srcds`, `garrysmod/cache/workshop`,
+`steamapps/workshop/content/4000` and `steam_cache` locations. Cache traversal is
+limited to archive layouts, not full game installations. Existing Wings streams
+the whole archive, including assets, so this option can be expensive. Excluded
+packed files are identified in the report, not silently approved.
 
-Coverage: .lua, .txt, .cfg, .vmt, .json, .dat and .js; GMA v1/v2/v3 and LZMA-alone
-Workshop archives. Platform/runtime trees are excluded. Native binaries, bytecode,
-unsupported archives, symbolic links, changed/unreadable files and limits produce
-explicit uninspected/incomplete results. Limits: 2 MiB/text file, 1 GiB/archive
-(including expanded size), 4 GiB transferred, 20,000 candidate files, 100,000
-entries, 10,000 directories and 2 hours. Archive processing has separate bounded
-entry/analysis limits. At most 500 findings and 200 coverage details are retained;
-truncation is shown. Static analysis can miss dynamic/cross-file obfuscation,
-native behavior and code downloaded after a scan. Zero findings is not a clean
-bill of health. Reports describe files as read, not an atomic server snapshot.
-Rules are bundled and updated with the addon, not a live malware feed.
+Results include severity, path/member, line/context, rules and explanations.
+Private caches reuse unchanged analysis; new/modified files are checked on the
+next scan. Manual scans normally use size/mtime for reuse; the content-recheck
+option verifies bytes too. Cache and approval versions change with rules.
+Source contents never run as part of analysis. Potential copying/self-propagation
+patterns are reported, alongside HTTP/network execution, privilege changes and
+other documented indicators. This is a heuristic tool, not a runtime monitor or
+guarantee. Legitimate administration/DRM can match; findings require review.
+
+Panel start/restart requests automatically queue a selected-code check before
+Wings receives power. Start checks always hash selected contents, catching edits
+with preserved timestamps, while reusing analysis for unchanged bytes. New
+unapproved high/critical findings or blocking inspection errors hold the start.
+An operator with file read/create/update permissions can approve an exact file
+version after review, or correct/remove the suspect code, then request start
+again. Changed contents or rule updates require fresh review. Read-only users
+cannot approve files. Stop/kill and Cancel queued start cancel pending requests.
+
+Normal and Arix power buttons use the shared websocket bridge, which sends GMod
+power actions through the authenticated Panel API. Fresh GMod websocket tokens
+cannot issue power directly; non-GMod permissions/transport are retained.
+Reload the Panel after updating. Existing tokens may retain old rights for up to
+10 minutes. Direct node/API administrative starts, Wings boot/crash auto-restarts
+and live Lua loads on an already-running server are outside this guard. The scan
+is not an atomic filesystem lock or live prevention agent. No game-side code,
+node daemon or Proxmox edit is installed by the scanner.
+
+Limits apply to selected transfers, not server capacity: 512 MiB loose code plus
+a separate 4 GiB optional packed budget; 2 MiB/text file, 1 GiB/archive including
+expanded data, 50,000 candidates and 2 hours. Archives have bounded member/analysis
+limits. Quotas retain partial findings and explain uninspected inputs. Native
+binaries, bytecode, unsupported formats, symlinks and unreadable/changed files are
+reported. At most 500 priority findings and 200 coverage details are retained;
+truncation is shown. Private caches are bounded to 50,000 file slots per server.
+Zero findings does not prove a server is safe. Reports/cache data are private
+and survive page reloads. No file is automatically deleted or changed.
 
 Workshop shows a responsive collection grid with the actual Steam thumbnail,
 title, description, download size, subscriber count and update date for each

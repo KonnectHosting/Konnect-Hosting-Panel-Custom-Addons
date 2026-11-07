@@ -1,6 +1,6 @@
 # Backdoor Scanner: rules, research and limits
 
-Rules version: **2026.11.07.1**. Reviewed 2026-11-07. This implementation and its
+Rules version: **2026.11.07.2**. Reviewed 2026-11-07. This implementation and its
 synthetic regression corpus were written for GMod Toolkit; no third-party scanner
 or malware payload is executed or installed. The scanner needs no Steam key,
 node service, Proxmox change or game-side Lua installation.
@@ -47,6 +47,7 @@ node service, Proxmox change or game-side Lua installation.
 | `remote-privilege`, `authorization-override` | High | Remote callbacks alter administration, or admin/permission functions are replaced. Merely seeing an admin check does not prove it protects the actual sender. |
 | `privilege-change`, `privilege-table-write`, `admin-command` | Medium/high | Administration APIs, direct rank-table writes and admin console commands. These legitimately occur in administration frameworks. |
 | `indirect-execution`, `encoded-loader`, `encoded-payload` | High | Indexed/encoded executor, decoding alongside execution, or bounded literal Base64 containing sensitive APIs. Literal inspection never evaluates Lua. |
+| `code-propagation` | High | Script reads feed file writes, or source introspection appears with copying. Review destinations/loops; installers and backups can match. This is not runtime monitoring. |
 | `file-execution`, `persistent-write` | High/medium | Files feed execution or code changes script/privilege paths. Review file provenance and who can write it. |
 | `possible-exfiltration`, `console-execution`, `native-execution` | High | Potential credentials/configuration in HTTP arguments, sensitive/network-derived console commands, or native/OS interfaces. Legitimate integrations can match. |
 | `historical-channel` | High receiver / medium registration | Exact small historical name set; names can be reused by legitimate/protection addons. References in comments or unused string lists are not flagged. |
@@ -61,39 +62,114 @@ or general taint engine. Function shadowing, reassignment, complicated tables,
 dynamic encodings, metaprogramming and cross-file flows can mislead it. Severity
 is review priority, not a claim of confirmed malware or measured probability.
 
-## Scope and operational limits
+## Targeted scope and resource limits
 
-- Discover server-visible folders recursively. Root platform/runtime trees
-  (`bin`, `bin64`, `linux32`, `linux64`, `platform`, `sourceengine`, `hl2`,
-  `steamcmd`, `.steam`) and `.git` directories are excluded. This covers usual
-  `garrysmod/addons`, `garrysmod/lua`, gamemodes/data, Workshop content and caches,
-  plus custom folders outside those excluded trees. Files mounted outside what
-  Wings exposes cannot be inspected by this Panel-only addon.
-- Inspect `.lua`, `.txt`, `.cfg`, `.vmt`, `.json`, `.dat`, `.js`, `.gma`, and
-  Workshop/cache `.bin` containers. Inside GMA, inspect the relevant text members
-  without extracting paths. Arbitrary image/model/map binary payloads are not
-  exhaustively searched; code loading their contents may be detected in Lua.
-- GMA v1/v2/v3 and LZMA-alone are supported. Other compression/container formats,
-  nested archives, native modules and Lua bytecode are explicitly uninspected.
-- 2 MiB per text/member; 1 GiB per raw or expanded archive; LZMA dictionary memory
-  capped at 64 MiB; archive table capped at 50,000 entries; archive text capped at
-  5,000 members / 64 MiB. The helper also has CPU, memory and wall-clock limits.
-- Scan caps: 4 GiB transfers, 20,000 candidates, 100,000 directory entries,
-  10,000 directories, path/depth bounds and 2 hours. Preserve at least 1 GiB Panel
-  disk space. Temporary inputs are private and removed after processing; archive
-  decompression uses an anonymous temporary file. Server file contents never
-  become public FastDL downloads.
-- Retain the highest-priority findings: at most 30 per helper invocation, 500 per report and 200
-  coverage explanations. A limit, unreadable/changed file, invalid archive,
-  symlink, bytecode or unsupported format produces explicit incomplete coverage.
-  Do not interpret zero findings or an incomplete scan as “clean.”
-- Files are inspected at different times. This is not an atomic snapshot or
-  running-server protection. Newly downloaded code or later edits require a new
-  scan. Starting another scan replaces the latest report; download it first to
-  keep a copy. No files are automatically removed, quarantined or changed.
+The default scans only loose code below:
 
-Rules ship with a reviewed addon release. There is no live executable threat feed,
-remote payload fetching, account reputation lookup or automatic name whitelist.
-The current tests use synthetic code/archive data, real Laravel/queue behavior
-and mocked Wings transport; they do not establish detection rates against a
-representative real-world malicious/benign addon corpus.
+- `/garrysmod/lua`
+- `/garrysmod/addons`
+- `/garrysmod/gamemodes`
+- `/garrysmod/data`
+- `/garrysmod/cfg`
+- `/garrysmod/materials`
+
+Metadata for ancestor paths is read to reject symlinks; this never becomes a
+container-wide recursive search. Top-level map/model/sound/particle/resource/
+screenshot/asset trees inside unpacked addons and gamemodes are pruned. Lua
+folders with those names are retained. Material VMT files remain in scope.
+`.git` and `node_modules` trees are excluded. FastDL, backups, game engines and
+arbitrary custom root folders are not visited. A 60–100 GB server is not rejected
+because of its overall size; only selected file transfers consume scan budgets.
+
+**Optional packed mode**, off by default, also reads GMA files in those folders
+and the known caches `/garrysmod/cache/srcds`, `/garrysmod/cache/workshop`,
+`/steamapps/workshop/content/4000` and `/steam_cache`. Only known Workshop/numeric
+item layouts within `steam_cache` are traversed; cached full-game installations
+are excluded. Cache roots are archive-only. Packed addons found in a default
+loose-code scan are reported as excluded, not silently called clean.
+
+Wings' existing file API streams entire files, not selected GMA members. Packed
+mode therefore transfers the archive's assets too. It runs **after loose code**,
+with a separate 4 GiB transfer budget; the default loose-code budget is 512 MiB.
+Budgets count attempted reads, not total server capacity. Findings already
+collected survive quota/discovery limits. Loose files are processed while their
+folders are discovered; there is no collect-everything-first failure.
+
+- Text types: `.lua`, `.txt`, `.cfg`, `.vmt`, `.json`, `.dat`, `.js`. Packed mode:
+  GMA v1/v2/v3 and LZMA-alone `.gma` / Workshop-cache `.bin` inputs. No paths are
+  extracted. Other containers, native code and bytecode remain uninspected.
+- 2 MiB per text/member; 1 GiB per raw/expanded archive; LZMA dictionary capped at
+  64 MiB; archive table capped at 50,000 entries; archive analysis capped at
+  5,000 text members / 64 MiB. Helper CPU/memory/wall limits remain enforced.
+- Scan caps: 50,000 candidates, 100,000 selected-directory entries, 10,000
+  directories, path/depth bounds and 2 hours. Preserve at least 1 GiB Panel free
+  space. Quotas retain partial results and explain what was not inspected.
+- Retain the highest-priority findings: 30 per helper invocation, 500 per report,
+  and 200 coverage details. Unapproved findings take precedence over approved
+  file versions. Report truncation never clears the pre-start count of new
+  high/critical findings. Static detection has false positives and false negatives.
+
+## Incremental results and approvals
+
+Private per-server, per-path caches store source SHA-256, metadata, the rules/
+scope version and static analysis output. Normal manual scans reuse records
+when size and modification time match. The content-recheck option downloads and
+hashes selected files even if metadata is unchanged, and reuses analysis when
+bytes match. Metadata-only reuse is an optimization, not a tamper-proof claim:
+SFTP or another process can preserve timestamps. Cache slots are bounded to
+50,000 per server; uncached files are still inspected. Deleted files disappear
+from the next report. Rules/scope changes invalidate cached analysis.
+
+Explicit approvals require existing file-read/create/update permissions and a
+completed report containing that exact file/SHA-256. They apply to the whole file
+(or whole GMA), not just one shown line. Content changes or detection-rule updates
+invalidate the approval. Read-only users cannot approve code or cancel another
+user's preflight scan. Approvals are private and record actor/time; no game file
+is rewritten. Starting a new scan replaces the latest report, not the cache.
+
+## Checks before Panel power actions
+
+The shared Panel Wings power repository intercepts GMod start/restart requests,
+including normal client/API, administrator and scheduled operations using that
+repository. The request queues a guarded check; it never forwards power first.
+The requesting actor's current power permission, server eligibility/state, nonce,
+cancellation marker and expiry are checked again before sending the action.
+
+Power checks always re-read/hash selected content, even when timestamps are
+unchanged; unchanged **analysis** is reused. Thus CPU-intensive detection is run
+for new/changed contents rather than exhaustively repeated for every file.
+The last manually selected packed-mode setting applies. Packed mode is still
+optional and expensive; its exclusions are not a guarantee about unscanned code.
+
+A completed selected-scope check with no unapproved high/critical findings and no
+blocking inspection errors sends the requested action once. Findings needing
+review, unreadable selected code, lost permissions, queue failures, cancellation,
+replacement or expiry hold it. Review/correct the file, or explicitly approve its
+exact version, then request start/restart again. Intentional out-of-scope formats
+are listed separately; they are not treated as successful malware inspection.
+Stop/kill cancels a queued start. An explicit Cancel queued start button also
+works while the game is offline and its normal Stop button is disabled.
+
+Normal Panel power buttons use the Wings websocket. For eligible GMod servers,
+fresh websocket tokens carry a marker and omit direct power permissions; owner
+`*` permissions are expanded to equivalent known non-power permissions, while
+existing admin flags are retained and subuser privileges are never expanded.
+The shared socket client (also used by Arix) forwards those power actions through
+the normal authenticated Panel API. Console/log/stat traffic is unchanged.
+Other eggs retain their original permissions and transport. Disabling/deleting
+the addon restores the exact native source fragments.
+
+Reload the Panel after updating. Existing tokens issued before the update may
+retain their old rights until their existing 10-minute expiry. Direct node/API
+administrative starts, Wings crash/boot auto-restarts and code loaded while GMod
+is already running are outside this Panel-only guard. A scan is a point-in-time
+review, not an atomic filesystem lock, runtime sandbox or live malware monitor.
+Concurrent file changes and sophisticated dynamic/cross-file behavior can evade
+it. The propagation rule identifies suspicious copying patterns; it does not
+observe or prove a running infection spreading.
+
+Rules ship with addon releases. There is no downloaded executable threat feed,
+payload fetching, account reputation lookup or automatic name whitelist. Tests
+use synthetic code/archive data, actual Laravel/queue code and mocked Wings;
+they do not establish representative real-world malware detection rates or
+live 100 GB server performance.

@@ -49,6 +49,9 @@ const state = {
     url: null,
     export: null,
     scanner: '',
+    scanArchives: false,
+    powerCheck: null,
+    approved: false,
     scanPolls: 0,
     requests: [],
 };
@@ -79,7 +82,28 @@ const server = http.createServer(async (request, response) => {
         response.setHeader('Content-Type', 'application/json');
         response.end(JSON.stringify(data));
     };
+    if (url.pathname.endsWith('/power')) {
+        state.powerCheck = {
+            status: 'pending',
+            signal: body.signal,
+            message: 'Checking new and changed code before start.',
+        };
+        send({ message: 'Queued selected-code check.' });
+        return;
+    }
+    if (url.pathname.endsWith('/scanner/cancel-start')) {
+        state.powerCheck = { status: 'cancelled', signal: 'start', message: 'Queued start/restart cancelled.' };
+        send({ message: 'Queued start/restart cancelled.' });
+        return;
+    }
+    if (url.pathname.endsWith('/scanner/approve')) {
+        state.approved = body.file;
+        send({ message: 'This exact file version is approved for start checks.' });
+        return;
+    }
     if (url.pathname.endsWith('/scanner/start')) {
+        state.scanArchives = !!body.archives;
+        state.approved = false;
         state.scanner = 'running';
         state.scanPolls = 0;
         send({ status: 'running' });
@@ -135,10 +159,28 @@ const server = http.createServer(async (request, response) => {
             },
         ];
         send({
-            rulesVersion: '2026.11.07.1',
+            powerCheck: state.powerCheck,
+            locations: [
+                '/garrysmod/lua',
+                '/garrysmod/addons',
+                '/garrysmod/gamemodes',
+                '/garrysmod/data',
+                '/garrysmod/cfg',
+                '/garrysmod/materials',
+            ],
+            archiveLocations: [
+                '/garrysmod/cache/srcds',
+                '/garrysmod/cache/workshop',
+                '/steamapps/workshop/content/4000',
+                '/steam_cache',
+            ],
+            rulesVersion: '2026.11.07.2',
             scan: state.scanner
                 ? {
                       id: 'c'.repeat(64),
+                      scopeVersion: 'targeted-v1',
+                      includeArchives: state.scanArchives,
+                      reused: 2,
                       status: state.scanner,
                       phase: done ? 'inspect' : 'discover',
                       started: new Date().toISOString(),
@@ -156,7 +198,15 @@ const server = http.createServer(async (request, response) => {
                       issues: [
                           { file: '/garrysmod/lua/bin/native.so', reason: 'Native binary cannot be inspected as Lua.' },
                       ],
-                      findings: done ? findings : [],
+                      findings: done
+                          ? findings
+                                .filter((f) => state.scanArchives || !f.member)
+                                .map((f) => ({
+                                    ...f,
+                                    fingerprint: 'e'.repeat(64),
+                                    approved: state.approved === f.file,
+                                }))
+                          : [],
                       findingCount: done ? 3 : 0,
                       truncated: false,
                       partial: true,
@@ -164,7 +214,7 @@ const server = http.createServer(async (request, response) => {
                       message: done
                           ? 'Scan finished. Findings need review; no static scanner can prove that a server is safe.'
                           : '',
-                      rulesVersion: '2026.11.07.1',
+                      rulesVersion: '2026.11.07.2',
                   }
                 : null,
         });
@@ -504,7 +554,9 @@ const server = http.createServer(async (request, response) => {
         );
         results.push('read-only customers do not see mutating controls');
         await load('scanner');
+        assert.equal(await evaluate('document.querySelector("#scan-archives").checked'), false);
         await click('Start scan');
+        assert.equal(state.scanArchives, false);
         await waitFor('document.body.textContent.includes("Scan finished")');
         assert(await evaluate('document.body.textContent.includes("CRITICAL")'));
         assert(await evaluate('document.body.textContent.includes("line 27")'));
@@ -513,9 +565,9 @@ const server = http.createServer(async (request, response) => {
         assert.equal(await evaluate('document.body.textContent.includes("Global or debug environment access")'), false);
         await screenshot('scanner-desktop.png');
         results.push('scanner progress, severity, file/line context, escaped code and incomplete coverage');
-        await evaluate('document.querySelector("input[type=checkbox]").click()');
+        await evaluate('document.querySelector("#scan-low-priority").click()');
         await waitFor('document.body.textContent.includes("Global or debug environment access")');
-        await value('#scan-filter', 'packed.gma');
+        await value('#scan-filter', 'example');
         await waitFor('document.body.textContent.includes("1 matching files")');
         const scansStarted = state.requests.filter((r) => r.path.endsWith('/scanner/start')).length;
         await load('scanner', 390);
@@ -525,6 +577,39 @@ const server = http.createServer(async (request, response) => {
         assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth'));
         await screenshot('scanner-mobile.png');
         results.push('scanner filters, optional low indicators, saved report/manual refresh and mobile overflow');
+        await evaluate('document.querySelector("#scan-archives").click()');
+        await click('Run a new scan');
+        await waitFor('document.body.textContent.includes("Scan finished")');
+        assert.equal(state.scanArchives, true);
+        await waitFor('document.body.textContent.includes("packed.gma")');
+        await click('Approve this exact file for starts');
+        await waitFor('document.body.textContent.includes("This exact file version is approved")');
+        assert.equal(state.approved, '/garrysmod/addons/example/lua/server.lua');
+        results.push('targeted scan defaults, explicit packed mode, reused results and exact-file approval');
+        const beforePower = state.requests.filter((r) => r.path.endsWith('/power')).length;
+        await evaluate(
+            `window.toolkitSocket.setToken('e30.' + btoa(JSON.stringify({server_uuid:'12345678-1234-1234-1234-123456789abc',permissions:['gmod.toolkit.guarded-power']})) + '.fixture').send('set state','start')`
+        );
+        for (
+            let attempt = 0;
+            attempt < 30 && state.requests.filter((r) => r.path.endsWith('/power')).length === beforePower;
+            ++attempt
+        )
+            await pause(100);
+        assert.equal(state.requests.filter((r) => r.path.endsWith('/power')).length, beforePower + 1);
+        assert.equal(state.requests.filter((r) => r.path.endsWith('/power')).at(-1).body.signal, 'start');
+        await evaluate(
+            `window.toolkitSocket.setToken('e30.' + btoa(JSON.stringify({server_uuid:'12345678-1234-1234-1234-123456789abc',permissions:['*']})) + '.fixture').send('set state','start')`
+        );
+        await pause(100);
+        assert.equal(state.requests.filter((r) => r.path.endsWith('/power')).length, beforePower + 1);
+        results.push(
+            'actual shared websocket bridge routes guarded power through the Panel and leaves other servers unchanged'
+        );
+        await click('Refresh results');
+        await click('Cancel queued start');
+        await waitFor('document.body.textContent.includes("Queued start/restart cancelled")');
+        results.push('queued start can be cancelled before Wings receives a power command');
         await click('Run a new scan');
         await click('Cancel scan');
         await waitFor('document.body.textContent.includes("cancelled")');

@@ -14,7 +14,7 @@ import tempfile
 import zlib
 from dataclasses import dataclass
 
-RULES_VERSION = '2026.11.07.1'
+RULES_VERSION = '2026.11.07.2'
 MAX_SCRIPT = 2 * 1024 * 1024
 MAX_ARCHIVE = 1024 * 1024 * 1024
 MAX_FINDINGS = 30
@@ -248,6 +248,12 @@ def analyze(raw, member=''):
                 add('console-execution', 'high', 'Sensitive or network-controlled console command', 'A console command can execute code or change sensitive server settings. Check its source and sender checks.', line)
         if name in {'file.Write', 'file.Append'} and any(re.search(r'(?i)(?:\.lua\b|autorun|users\.txt|server\.cfg)', v) for v in literals):
             add('persistent-write', 'medium', 'Script or privilege-related file write', 'Review whether this writes a loader, startup script or privilege data. Normal addon persistence can also match.', line)
+        if name in {'file.Write', 'file.Append'}:
+            copied = inside(call, {'file.Read'}) or any(t.kind == 'id' and t.value in sources and sources[t.value][0] == 'file.Read' and sources[t.value][1] < call['start'] for t in args)
+            script_path = any(re.search(r'(?i)\.lua\b|autorun|addons/', value) for value in literals)
+            self_source = any(c['name'] == 'debug.getinfo' for c in calls)
+            if copied and (script_path or self_source):
+                add('code-propagation', 'high', 'Script content is copied to another file', 'Read script data flows into a file write, or source-introspection and copying occur together. Inspect targets and loops for self-copying loaders. Installers/backups can also match; this is static evidence, not proof of runtime spread.', line)
         if name in {'os.execute', 'io.popen', 'package.loadlib', 'ffi.load'}:
             add('native-execution', 'high', 'Native code or operating-system access', 'Native modules can bypass Lua-level restrictions. Their binary content is outside this static Lua analysis.', line)
         if name == 'require' and literals and literals[0] not in {'hook', 'concommand', 'cvars', 'timer', 'net', 'usermessage', 'http', 'properties', 'widgets', 'drive', 'cookie', 'utf8', 'jit', 'bit'}:

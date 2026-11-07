@@ -1,0 +1,5 @@
+        $permissions = $this->permissionsService->handle($server, $user);
+
+        if (class_exists(\Pterodactyl\Addons\GmodToolkit\StartGuard::class)) {
+            $permissions = \Pterodactyl\Addons\GmodToolkit\StartGuard::websocketPermissions($server, $permissions);
+        }

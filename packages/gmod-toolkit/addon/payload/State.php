@@ -76,15 +76,16 @@ final class State
         if (is_file($path) && !unlink($path)) { throw new RuntimeException('Cannot remove private state.'); }
     }
 
-    public function keys(string $prefix): array
+    public function keys(string $prefix, int $limit = 10000): array
     {
+        if ($limit < 1 || $limit > 50001) { throw new RuntimeException('Invalid state listing limit.'); }
         if (!preg_match('/^[a-z0-9-]+$/D', $prefix)) { throw new RuntimeException('Invalid state prefix.'); }
         $keys = [];
         foreach (new \DirectoryIterator($this->root) as $entry) {
             $name = $entry->getFilename();
             if ($entry->isFile() && !$entry->isLink() && str_starts_with($name, $prefix) && str_ends_with($name, '.json')) {
                 $keys[] = substr($name, 0, -5);
-                if (count($keys) >= 10000) { break; }
+                if (count($keys) >= $limit) { break; }
             }
         }
         return $keys;

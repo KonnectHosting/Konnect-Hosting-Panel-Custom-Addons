@@ -5,6 +5,8 @@ import '@/assets/tailwind.css';
 import Workshop from '@/components/server/gmodToolkit/WorkshopContainer';
 import Fastdl from '@/components/server/gmodToolkit/FastdlContainer';
 import Scanner from '@/components/server/gmodToolkit/ScannerContainer';
+import { Websocket } from '@/plugins/Websocket';
+(window as Window & { toolkitSocket?: Websocket }).toolkitSocket = new Websocket();
 const page = new URLSearchParams(location.search).get('page');
 ReactDOM.render(
     <BrowserRouter>

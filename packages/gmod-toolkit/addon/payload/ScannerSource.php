@@ -38,21 +38,30 @@ class ScannerSource
         return $rows;
     }
 
-    private function ancestors(Server $server, string $path, float $deadline): void
+    private function ancestors(Server $server, string $path, float $deadline, bool $optional = false): bool
     {
         if (!self::path($path)) { throw new RuntimeException('Invalid scan path.'); }
-        if ($path === '/') { return; }
+        if ($path === '/') { return true; }
         $current = '/';
         foreach (explode('/', ltrim($path, '/')) as $part) {
             $found = null;
             foreach ($this->rows($server, $current, $deadline) as $row) { if (($row['name'] ?? '') === $part) { $found = $row; break; } }
+            if (!$found && $optional) { return false; }
             if (!$found || !AssetPolicy::ordinary($found, true)) { throw new RuntimeException('Directory disappeared, changed type or is a symbolic link.'); }
             $current = rtrim($current, '/') . '/' . $part;
         }
+        return true;
+    }
+
+    public function available(Server $server, string $root): bool
+    {
+        if (!in_array($root, ScanScope::roots(true), true)) { throw new RuntimeException('Folder is outside the scanner locations.'); }
+        return $this->ancestors($server, $root, microtime(true) + 18, true);
     }
 
     public function listing(Server $server, string $path): array
     {
+        if (!ScanScope::directory($path)) { throw new RuntimeException('Folder is outside the scanner locations.'); }
         $deadline = microtime(true) + 18;
         $this->ancestors($server, $path, $deadline);
         return $this->rows($server, $path, $deadline);
@@ -60,7 +69,7 @@ class ScannerSource
 
     public function copy(Server $server, string $path, array $expected, string $target): void
     {
-        if (!self::path($path) || !is_int($expected['bytes']) || $expected['bytes'] < 0 || $expected['bytes'] > 1073741824) { throw new RuntimeException('Invalid scan file.'); }
+        if (!ScanScope::file($path) || !is_int($expected['bytes']) || $expected['bytes'] < 0 || $expected['bytes'] > 1073741824) { throw new RuntimeException('Invalid or out-of-scope scan file.'); }
         $deadline = microtime(true) + 22;
         $parent = dirname($path);
         $this->ancestors($server, $parent, $deadline);

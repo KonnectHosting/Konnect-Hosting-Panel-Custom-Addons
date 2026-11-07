@@ -1,10 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import http from '@/api/http';
+import Can from '@/components/elements/Can';
 import ToolkitPage, { useToolkit, button, secondary, box, field, formatBytes } from './ToolkitPage';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low';
 interface Finding {
+    fingerprint?: string;
+    approved?: boolean;
     file: string;
     member: string;
     line: number;
@@ -16,6 +19,11 @@ interface Finding {
     context: { line: number; text: string }[];
 }
 interface Scan {
+    reused?: number;
+    powerCheck?: { status: string; signal: string; message: string } | null;
+    scopeVersion?: string;
+    includeArchives?: boolean;
+    locations?: string[];
     id: string;
     status: string;
     phase: string;
@@ -41,8 +49,11 @@ interface Scan {
     rulesVersion: string;
 }
 interface Status {
+    powerCheck?: { status: string; signal: string; message: string } | null;
     scan: Scan | null;
     rulesVersion: string;
+    locations: string[];
+    archiveLocations: string[];
 }
 const weight = { critical: 0, high: 1, medium: 2, low: 3 };
 const colors = {
@@ -55,12 +66,21 @@ const visible = (text: string) =>
     text.replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, (char) => `\\u${char.charCodeAt(0).toString(16)}`);
 
 export default () => {
-    const { id, base, status, busy, error, notice, run, refresh } = useToolkit<Status>('scanner', true);
+    const { id, base, status, busy, error, notice, run, refresh, setNotice } = useToolkit<Status>('scanner', true);
     const [query, setQuery] = useState('');
     const [low, setLow] = useState(false);
     const [page, setPage] = useState(0);
+    const [archives, setArchives] = useState(false);
+    const [verify, setVerify] = useState(false);
+    useEffect(() => {
+        setArchives(false);
+        setVerify(false);
+        setQuery('');
+        setPage(0);
+    }, [base]);
     const scan = status?.scan;
     const running = scan?.status === 'running';
+    const power = status?.powerCheck || scan?.powerCheck;
     const groups = useMemo(() => {
         const filtered = (scan?.findings || []).filter(
             (finding) =>
@@ -90,6 +110,17 @@ export default () => {
                 Find suspicious Lua, hidden privilege grants and remote code loaders in your server files and packed
                 addons.
             </p>
+            {power && (
+                <p
+                    role={'status'}
+                    className={
+                        'p-3 mb-4 rounded text-sm ' +
+                        (power.status === 'blocked' ? 'bg-red-900 text-red-100' : 'bg-blue-900 text-blue-100')
+                    }
+                >
+                    {power.message}
+                </p>
+            )}
             <section className={box}>
                 <p
                     className={
@@ -100,13 +131,47 @@ export default () => {
                     Files are never executed, changed, deleted or automatically approved. A scan with no findings does
                     not prove a server is safe.
                 </p>
+                <label className={'flex items-start gap-2 mt-4 text-sm'}>
+                    <input
+                        id={'scan-archives'}
+                        type={'checkbox'}
+                        className={'mt-1'}
+                        checked={archives}
+                        disabled={busy || running}
+                        onChange={(event) => setArchives(event.target.checked)}
+                    />
+                    <span>
+                        Include packed addons and Workshop archives
+                        <span className={'block text-xs text-neutral-300 mt-1'}>
+                            Optional: Wings must transfer entire archives, including their assets. Loose code is
+                            inspected first; archive work has a separate budget.
+                        </span>
+                    </span>
+                </label>
+                <label className={'flex items-start gap-2 mt-3 text-sm'}>
+                    <input
+                        id={'scan-verify'}
+                        type={'checkbox'}
+                        className={'mt-1'}
+                        checked={verify}
+                        disabled={busy || running}
+                        onChange={(event) => setVerify(event.target.checked)}
+                    />
+                    <span>
+                        Recheck file contents even when size and modification time are unchanged
+                        <span className={'block text-xs text-neutral-300 mt-1'}>
+                            Normal scans reuse previous results for unchanged metadata. This option downloads and hashes
+                            selected files again.
+                        </span>
+                    </span>
+                </label>
                 <div className={'flex flex-wrap items-center mt-3'}>
                     <button
                         className={button}
                         disabled={busy || running || !status}
                         onClick={() =>
                             run(async () => {
-                                await http.post(`${base}/scanner/start`);
+                                await http.post(`${base}/scanner/start`, { archives, verify });
                                 setPage(0);
                                 await refresh();
                             })
@@ -139,6 +204,23 @@ export default () => {
                     >
                         Refresh results
                     </button>
+                    {power?.status === 'pending' && (
+                        <button
+                            className={secondary}
+                            disabled={busy}
+                            onClick={() =>
+                                run(async () => {
+                                    const { data } = await http.post<{ message: string }>(
+                                        `${base}/scanner/cancel-start`
+                                    );
+                                    setNotice(data.message);
+                                    await refresh();
+                                })
+                            }
+                        >
+                            Cancel queued start
+                        </button>
+                    )}
                     {scan && (
                         <button
                             className={secondary}
@@ -160,10 +242,33 @@ export default () => {
                 <details className={'mt-4 text-sm text-neutral-300'}>
                     <summary className={'cursor-pointer'}>What is scanned and how detections work</summary>
                     <p className={'mt-3'}>
-                        Scans installed addon, Lua, gamemode and data folders, Workshop caches and custom server folders
-                        through the existing file connection. Reads .lua, .txt, .cfg, .vmt, .json, .dat and .js files,
-                        plus GMA archives and LZMA-compressed Workshop archives. Code hidden in these non-Lua files is
-                        included.
+                        After the first scan, new or modified files are checked and unchanged results are reused.
+                        Starts/restarts sent through the Panel wait for an incremental check of the selected locations.
+                        Automatic start checks verify content hashes, while reusing unchanged analysis. New
+                        high-priority findings or unreadable selected code hold the start for review. Stop/kill cancels
+                        a queued start. Direct Wings starts and live Lua execution are outside this guard.
+                    </p>
+                    <p className={'mt-3'}>
+                        The default scan checks loose .lua, .txt, .cfg, .vmt, .json, .dat and .js code in these
+                        locations:
+                    </p>
+                    <ul className={'mt-2 space-y-1 text-xs font-mono break-all'}>
+                        {status?.locations?.map((path) => (
+                            <li key={path}>{path}</li>
+                        ))}
+                    </ul>
+                    <p className={'mt-3'}>
+                        Packed-addon mode also checks GMA archives in those folders and these known Workshop caches:
+                    </p>
+                    <ul className={'mt-2 space-y-1 text-xs font-mono break-all'}>
+                        {status?.archiveLocations?.map((path) => (
+                            <li key={path}>{path}</li>
+                        ))}
+                    </ul>
+                    <p className={'mt-3'}>
+                        The container root is never searched. FastDL, backups, game engines, maps, models, sounds and
+                        other unrelated folders are excluded. Material .vmt files remain included because they can
+                        conceal Lua payloads.
                     </p>
                     <p className={'mt-2'}>
                         Looks for network-to-Lua execution, HTTP loaders, hardcoded identities near admin grants,
@@ -173,10 +278,12 @@ export default () => {
                     </p>
                     <p className={'mt-2'}>
                         Native binaries, bytecode, unsupported archives, symbolic links and oversized or unreadable
-                        files are listed as uninspected. Platform/runtime directories are excluded. Limits: 2 MiB per
-                        text file, 1 GiB per archive, 4 GiB transferred, 20,000 candidate files and 2 hours per scan.
-                        Dynamic obfuscation, cross-file execution and code downloaded after the scan can evade static
-                        detection. The scan is not a live runtime monitor.
+                        files are listed as uninspected. Server disk usage is not a scan-size limit. Read budgets apply
+                        only to selected code and optional archives: 512 MiB of loose code, separately 4 GiB of packed
+                        archives, 2 MiB per text file and 1 GiB per archive. Work is incremental, limited to 50,000
+                        candidates and 2 hours; hitting a budget retains the results already collected. Dynamic
+                        obfuscation, cross-file execution and code downloaded after the scan can evade static detection.
+                        The scan is not a live runtime monitor.
                     </p>
                 </details>
                 <p className={'text-xs text-neutral-400 mt-4'}>
@@ -188,9 +295,20 @@ export default () => {
                     <h2 className={'text-lg font-semibold capitalize'}>
                         {scan.status === 'complete' ? 'Scan finished' : scan.status}
                     </h2>
+                    {scan.scopeVersion === 'targeted-v1' ? (
+                        <p className={'text-sm text-neutral-300 mt-2'}>
+                            {scan.includeArchives
+                                ? 'Targeted loose-code scan with packed addons enabled.'
+                                : 'Targeted loose-code scan. Packed addons and Workshop caches were not included.'}
+                        </p>
+                    ) : (
+                        <p role={'alert'} className={'text-sm text-yellow-200 mt-2'}>
+                            This report used the previous scan locations. Run a new targeted scan.
+                        </p>
+                    )}
                     <p className={'text-sm text-neutral-300 mt-2'}>
-                        {scan.filesScanned} files inspected · {scan.scripts} text entries · {scan.archives} archives ·{' '}
-                        {formatBytes(scan.bytes)} read
+                        {scan.filesScanned} files checked · {scan.reused || 0} unchanged results reused · {scan.scripts}{' '}
+                        text entries · {scan.archives} archives · {formatBytes(scan.bytes)} read
                     </p>
                     {running && (
                         <div role={'status'} className={'mt-4 text-sm'}>
@@ -271,6 +389,7 @@ export default () => {
                         />
                         <label className={'text-sm flex items-center gap-2 mt-3'}>
                             <input
+                                id={'scan-low-priority'}
                                 type={'checkbox'}
                                 checked={low}
                                 onChange={(event) => {
@@ -312,6 +431,47 @@ export default () => {
                                     >
                                         Open containing folder ↗
                                     </Link>
+                                    {scan.status === 'complete' &&
+                                        findings.some(
+                                            (finding) =>
+                                                !finding.approved && ['high', 'critical'].includes(finding.severity)
+                                        ) &&
+                                        findings[0].fingerprint && (
+                                            <Can
+                                                action={[
+                                                    'file.read',
+                                                    'file.read-content',
+                                                    'file.create',
+                                                    'file.update',
+                                                ]}
+                                            >
+                                                <button
+                                                    className={secondary}
+                                                    disabled={busy}
+                                                    onClick={() =>
+                                                        run(async () => {
+                                                            const { data } = await http.post<{ message: string }>(
+                                                                `${base}/scanner/approve`,
+                                                                {
+                                                                    scan: scan.id,
+                                                                    file: findings[0].file,
+                                                                    fingerprint: findings[0].fingerprint,
+                                                                }
+                                                            );
+                                                            setNotice(data.message);
+                                                            await refresh();
+                                                        })
+                                                    }
+                                                >
+                                                    Approve this exact file for starts
+                                                </button>
+                                            </Can>
+                                        )}
+                                    {findings.every((finding) => finding.approved) && (
+                                        <p className={'text-xs text-neutral-300 mt-2'}>
+                                            This exact file version was approved for start checks.
+                                        </p>
+                                    )}
                                 </div>
                                 {findings.map((finding, n) => (
                                     <div key={n} className={'p-3 border-t border-neutral-600'}>

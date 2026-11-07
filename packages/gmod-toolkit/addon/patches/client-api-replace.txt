@@ -9,6 +9,8 @@
         Route::get('/scanner', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'status']);
         Route::post('/scanner/start', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'start']);
         Route::post('/scanner/cancel', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'cancel']);
+        Route::post('/scanner/approve', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'approve']);
+        Route::post('/scanner/cancel-start', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'cancelStart']);
         Route::post('/workshop/selection', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'selection']);
         Route::post('/fastdl/addon', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'buildAddon']);
         Route::get('/fastdl/addon/{id}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');

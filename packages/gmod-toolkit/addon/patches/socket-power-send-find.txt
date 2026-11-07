@@ -1,0 +1,1 @@
+    send(event: string, payload?: string | string[]) {
