@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "gmod.toolkit",
   "name": "GMod Toolkit",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.",
   "compatibility": {
     "manager": "=2.0.1",
@@ -16,6 +16,16 @@
       "source": "payload/Access.php",
       "target": "app/Addons/GmodToolkit/Access.php",
       "sha256": "95141689899bb906d88b12640e269a0cdc08162ca55be8318ebb751ef615635e"
+    },
+    {
+      "source": "payload/AddonBuilder.tsx",
+      "target": "resources/scripts/components/server/gmodToolkit/AddonBuilder.tsx",
+      "sha256": "8c135ee66973994f887798489f494d83fdf0b4bc6fa580618f52cb487743b852"
+    },
+    {
+      "source": "payload/AddonPackage.php",
+      "target": "app/Addons/GmodToolkit/AddonPackage.php",
+      "sha256": "a3b504fb63284c0dda29dab302931d3b307fdc1df07535f55310a7d6215a2b05"
     },
     {
       "source": "payload/AdminController.php",
@@ -40,17 +50,17 @@
     {
       "source": "payload/Enabled.php",
       "target": "app/Addons/GmodToolkit/Enabled.php",
-      "sha256": "fb1f518c21f736a7fdc50240c2e33f821b411a29b7d88ac478d1aea07b3345a2"
+      "sha256": "f77c252e6d6983e38feac516f787442127d14d9040916721b212f53db042cebf"
     },
     {
       "source": "payload/Fastdl.php",
       "target": "app/Addons/GmodToolkit/Fastdl.php",
-      "sha256": "868adef1a9c33b4944eb69d88f9009776e29470258702cb7a1a25cb44c5bde47"
+      "sha256": "ffe0576da3e593152cb36ef25750463ca05504d710ffdecab86ed352a7117d2c"
     },
     {
       "source": "payload/FastdlContainer.tsx",
       "target": "resources/scripts/components/server/gmodToolkit/FastdlContainer.tsx",
-      "sha256": "962d4e9d2758e2e3997af1dea09ae91789855bfd37f441aff7af2a518113c7c7"
+      "sha256": "e6a58d6c1481b63c3efe42518d4d50a1a1438b23c4f1e18f34ff6f824bd8ca3e"
     },
     {
       "source": "payload/GmodToolkitContainer.tsx",
@@ -65,12 +75,12 @@
     {
       "source": "payload/ToolkitController.php",
       "target": "app/Addons/GmodToolkit/ToolkitController.php",
-      "sha256": "c156d01057243557e56436f2dcc686dedbd6ea8ce3eb09602c082e027eb7d362"
+      "sha256": "9238fe256198a2837a3d5c6b35623557915aeee2d1f31a8638735f293dd8f480"
     },
     {
       "source": "payload/ToolkitPage.tsx",
       "target": "resources/scripts/components/server/gmodToolkit/ToolkitPage.tsx",
-      "sha256": "a500c1677590beab7eb0feb536d08138815ee82035f1aa800037bdb56033bae8"
+      "sha256": "40be127471fbd0140db499c685ae916bf1abf6a2f3b2302ae06f2195403a2374"
     },
     {
       "source": "payload/WingsFiles.php",
@@ -80,17 +90,32 @@
     {
       "source": "payload/Workshop.php",
       "target": "app/Addons/GmodToolkit/Workshop.php",
-      "sha256": "7443e6bca300ad0d2417def8c8314123308f3edae6ef33ccd9325d12bae37568"
+      "sha256": "d311ec352283f7fc37b1d410db4f6880f3baaa67e4a202d7f962018c24fee764"
+    },
+    {
+      "source": "payload/WorkshopCards.tsx",
+      "target": "resources/scripts/components/server/gmodToolkit/WorkshopCards.tsx",
+      "sha256": "ad05cb6727b4c1bf16b21a0e32bc7d561549824dd7ef26dd9fba6d0ded994eab"
     },
     {
       "source": "payload/WorkshopContainer.tsx",
       "target": "resources/scripts/components/server/gmodToolkit/WorkshopContainer.tsx",
-      "sha256": "98821802a12c264f661bf6b08bd865518fe20bc012ab9e6c920f694275df982a"
+      "sha256": "8155febfe687190053fbe0b88c2f8b6293283b4b794fafbb7482208d1cdd29f5"
     },
     {
       "source": "payload/compress.py",
       "target": "app/Addons/GmodToolkit/compress.py",
       "sha256": "559e421287a49adaf7d1c173b0d4b11d4ff351727124ef49898ef775fc3c392e"
+    },
+    {
+      "source": "payload/cover.jpg",
+      "target": "app/Addons/GmodToolkit/cover.jpg",
+      "sha256": "f412ab06bce45aadcb57486720e73963a05f703e1187156c0ef6a9e0782d97d6"
+    },
+    {
+      "source": "payload/package.py",
+      "target": "app/Addons/GmodToolkit/package.py",
+      "sha256": "323ae0f85a87d23895915afb1c6c7fa6e390f681838a7d5fc3586c97b597a7d1"
     },
     {
       "source": "payload/settings.blade.php",
@@ -106,7 +131,7 @@
       "find": "patches/client-api-find.txt",
       "replace": "patches/client-api-replace.txt",
       "beforeSha256": "238a0dad5ba3f468c66ad7841d40e6dba94f0f0c41804eed29f4d33bbc3c93bf",
-      "afterSha256": "9e9c6e627c72ac7550178c36678e14420392adb28110a86da3637cedacdd3326"
+      "afterSha256": "474665fef493a7c93b2680b39bf40b4ec1f25254c289f3842a2a9b3d88e64f5d"
     },
     {
       "id": "server-tab",

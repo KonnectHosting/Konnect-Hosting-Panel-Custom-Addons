@@ -56,7 +56,7 @@ $fetch = static function (string $method, array $ids) use (&$fixture): array {
             ? ['publishedfileid' => $id, 'result' => ($row['type'] ?? null) === 2 ? ($row['result'] ?? 1) : 9,
                 'children' => array_map(static fn ($v) => ['publishedfileid' => $v, 'filetype' => $fixture[$v]['type'] ?? 0], $row['children'] ?? [])]
             // Steam's published-file response can omit file_type entirely.
-            : ['publishedfileid' => $id, 'result' => $row['result'] ?? 1, 'consumer_app_id' => $row['app'] ?? 4000, 'title' => $row['title'] ?? $id];
+            : ['publishedfileid' => $id, 'result' => $row['result'] ?? 1, 'consumer_app_id' => $row['app'] ?? 4000, 'title' => $row['title'] ?? $id] + ($row['metadata'] ?? []);
     }
     return [$method === 'GetCollectionDetails' ? 'collectiondetails' : 'publishedfiledetails' => $items];
 };
@@ -166,6 +166,7 @@ class FakeFastdl extends Fastdl {
     public function preview(Server $server, int $actor): array { $this->calls[] = [$server->uuid, $actor, 'preview']; return ['status' => 'running']; }
     public function prepare(Server $server): array { $this->calls[] = [$server->uuid, 'prepare']; return ['root' => '/fastdl']; }
     public function info(Server $server, int $actor): array { $this->calls[] = [$server->uuid, $actor, 'info']; return ['url' => null]; }
+    public function buildAddon(Server $server, int $actor, string $preview, array $input): array { $this->calls[] = [$server->uuid, $actor, 'addon', $input]; return ['status' => 'running']; }
 }
 $files = new MemoryWings(); $fakeFastdl = new FakeFastdl();
 $controller = new ToolkitController($access, $state, $files, $workshop, $fakeFastdl);
@@ -238,15 +239,16 @@ test('enabled-version guard rejects stale routes after disable/update', function
     $path = $host->stateRoot . '/registry.json';
     if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'), true);
-    $record = ['version' => '1.2.0', 'manifest' => $manifest, 'enabled' => true];
+    $record = ['version' => '1.3.0', 'manifest' => $manifest, 'enabled' => true];
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     same('ok', (new Enabled())->handle(Request::create('/test'), fn () => 'ok'));
     $record['enabled'] = false;
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     reject(fn () => (new Enabled())->handle(Request::create('/test'), fn () => 'bad'), 404);
-    $record['enabled'] = true; $record['version'] = $record['manifest']['version'] = '1.3.0';
+    $record['enabled'] = true; $record['version'] = $record['manifest']['version'] = '1.4.0';
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     reject(fn () => (new Enabled())->handle(Request::create('/test'), fn () => 'bad'), 404);
 });
 require __DIR__ . '/fastdl.php';
+require __DIR__ . '/assets.php';
 echo "$passed Panel/Workshop/FastDL tests passed. No real Wings/Steam requests were made.\n";

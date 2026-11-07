@@ -21,6 +21,8 @@ for source in sorted((ADDON / 'payload').iterdir()):
         target = 'resources/views/addons/gmod_toolkit/' + source.name
     elif source.suffix == '.tsx':
         target = 'resources/scripts/components/server/gmodToolkit/' + source.name
+    elif source.name == 'cover.jpg':
+        target = 'app/Addons/GmodToolkit/' + source.name
     else:
         raise ValueError('Unmapped payload: ' + source.name)
     files.append({'source': 'payload/' + source.name, 'target': target, 'sha256': digest(source)})
@@ -34,6 +36,9 @@ specs = [
         Route::get('/', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'status']);
         Route::get('/workshop', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'workshopStatus']);
         Route::get('/fastdl', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdlStatus']);
+        Route::get('/workshop/cover', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'cover']);
+        Route::post('/fastdl/addon', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'buildAddon']);
+        Route::get('/fastdl/addon/{id}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');
         Route::post('/workshop/preview', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'preview']);
         Route::post('/workshop/apply', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'apply']);
         Route::post('/fastdl/{action}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdl'])->where('action', 'prepare|preview|publish|rotate|revoke');
@@ -82,7 +87,7 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.2.0',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.3.0',
     'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,

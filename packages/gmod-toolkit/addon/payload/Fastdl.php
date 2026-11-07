@@ -14,7 +14,7 @@ use Symfony\Component\Process\Process;
 
 class Fastdl
 {
-    public const VERSION = '1.2.0';
+    public const VERSION = '1.3.0';
     private Closure $enqueue;
 
     public function __construct(private State $state, private AssetSource $source, private Access $access, ?Closure $enqueue = null)
@@ -68,7 +68,9 @@ class Fastdl
         if ($job && $job['status'] === 'preview-ready' && $job['actor'] === $actor && $job['expires'] >= time()) {
             $preview = $this->previewResult($r, $job);
         }
-        return ['url' => $r['token'] ? $this->url($r['token']) : null, 'files' => count($r['manifest']),
+        $addon = $job && $job['status'] === 'addon-ready' && $job['actor'] === $actor && $job['expires'] >= time()
+            ? ['id' => $job['id'], 'name' => $job['package']['metadata']['title'], 'filename' => $job['package']['filename'], 'bytes' => $job['package']['bytes'], 'expires' => $job['expires']] : null;
+        return ['url' => $r['token'] ? $this->url($r['token']) : null, 'files' => count($r['manifest']), 'addon' => $addon,
             'preview' => $preview, 'job' => $job ? ['status' => $job['status'], 'phase' => $job['phase'], 'message' => $job['message'],
                 'completed' => $job['cursor'], 'total' => count($job['entries']),
                 'inspected' => $job['visited'], 'pendingDirectories' => count($job['dirs']),
@@ -78,7 +80,7 @@ class Fastdl
     private function previewResult(array $r, array $job): array
     {
         $new = $job['manifest']; $old = $r['manifest'];
-        return ['preview' => $job['id'], 'files' => count($new), 'bytes' => $job['bytes'], 'skipped' => $job['skipped'],
+        return ['preview' => $job['id'], 'files' => count($new), 'bytes' => $job['bytes'], 'skipped' => $job['skipped'], 'resources' => array_keys($new),
             'added' => array_values(array_diff(array_keys($new), array_keys($old))),
             'removed' => array_values(array_diff(array_keys($old), array_keys($new))),
             'changed' => array_values(array_filter(array_keys($new), static fn ($path) => isset($old[$path]) && $new[$path]['sha256'] !== $old[$path]['sha256']))];
@@ -126,6 +128,33 @@ class Fastdl
         return ['status' => 'running'];
     }
 
+    public function buildAddon(Server $server, int $actor, string $preview, array $input): array
+    {
+        $job = $this->state->locked($this->key($server->uuid), function () use ($server, $actor, $preview, $input) {
+            $r = $this->record($server->uuid); $job = $r['job'] ?? [];
+            abort_unless(($job['status'] ?? null) === 'preview-ready' && $job['id'] === $preview && $job['actor'] === $actor
+                && ($job['sourceRoot'] ?? null) === AssetSource::ROOT && $job['expires'] >= time() && $job['revision'] === $r['revision'], 409, 'Preview expired, changed, or belongs to another user.');
+            $this->space($job['snapshot'], $job['bytes'] + 8388608);
+            (new AddonPackage($this->state))->start($job, $input);
+            $job['status'] = 'running'; $job['updated'] = time(); $job['progressed'] = time(); $job['expires'] = time() + 3600;
+            ++$job['sequence']; $job['attempts'] = 0; $r['job'] = $job;
+            $this->state->write($this->key($server->uuid), $r);
+            return $job;
+        });
+        $this->dispatch($server->uuid, $job);
+        return ['status' => 'running'];
+    }
+
+    public function addonDownload(Server $server, int $actor, string $id): array
+    {
+        $this->access->checkUser(User::find($actor), $server, true); $server->validateCurrentState();
+        $this->recover($server->uuid); $job = $this->record($server->uuid)['job'] ?? [];
+        abort_unless(($job['status'] ?? null) === 'addon-ready' && $job['id'] === $id && $job['actor'] === $actor && $job['expires'] >= time(), 404);
+        $path = $this->state->object($job['snapshot'], AddonPackage::key('workshop.zip'));
+        abort_unless(is_file($path) && !is_link($path) && filesize($path) === $job['package']['bytes'], 404);
+        return ['path' => $path, 'filename' => $job['package']['filename']];
+    }
+
     public function rotate(Server $server, bool $revoke): array
     {
         return $this->state->locked($this->key($server->uuid), function () use ($server, $revoke) {
@@ -159,12 +188,16 @@ class Fastdl
             try {
                 if ($job['actor'] !== $actor->id || $job['server'] !== $server->id || $job['revision'] !== $r['revision']) { throw new RuntimeException('FastDL operation was replaced.'); }
                 if (($job['sourceRoot'] ?? null) !== AssetSource::ROOT) { throw new RuntimeException('The upload location changed to /fastdl. Create a new preview from that folder.'); }
-                $this->access->checkUser($actor, $server, $job['phase'] === 'compress'); $server->validateCurrentState();
+                $this->access->checkUser($actor, $server, $job['phase'] === 'compress' || str_starts_with($job['phase'], 'addon-')); $server->validateCurrentState();
                 if (++$job['attempts'] > 3 || $job['expires'] < time()) { throw new RuntimeException('FastDL operation expired or exceeded its retry limit. Preview again.'); }
                 $job['updated'] = time(); $r['job'] = $job; $this->state->write($this->key($server->uuid), $r);
                 if ($job['phase'] === 'scan') { $this->scan($server, $job); }
                 elseif ($job['phase'] === 'copy') { $this->copy($server, $job); }
                 elseif ($job['phase'] === 'compress') { $this->compress($job); }
+                elseif (str_starts_with($job['phase'], 'addon-')) {
+                    $this->space($job['snapshot'], $job['phase'] === 'addon-write' ? $job['package']['entries'][$job['cursor']]['bytes'] + 1048576 : 8388608);
+                    (new AddonPackage($this->state))->step($job);
+                }
                 else { throw new RuntimeException('Invalid FastDL phase.'); }
                 if ($job['phase'] === 'commit') {
                     // One server record atomically selects the complete approved generation.
@@ -265,9 +298,9 @@ class Fastdl
     {
         $r = $this->record($uuid); $job = $r['job'] ?? null;
         if (!$job) { return; }
-        if (in_array($job['status'], ['running', 'preview-ready'], true) && ($job['sourceRoot'] ?? null) !== AssetSource::ROOT) {
+        if (in_array($job['status'], ['running', 'preview-ready', 'addon-ready'], true) && ($job['sourceRoot'] ?? null) !== AssetSource::ROOT) {
             $this->fail(['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence']], 'FastDL now uses /fastdl. Upload assets there and create a new preview. Existing published downloads are retained.');
-        } elseif (in_array($job['status'], ['running', 'preview-ready'], true) && $job['expires'] < time()) {
+        } elseif (in_array($job['status'], ['running', 'preview-ready', 'addon-ready'], true) && $job['expires'] < time()) {
             $this->fail(['uuid' => $uuid, 'job' => $job['id'], 'sequence' => $job['sequence']], $job['status'] === 'running'
                 ? 'FastDL timed out. The host should check the existing Panel queue worker before you retry.' : 'Preview expired.');
         } elseif ($job['status'] === 'running' && $job['updated'] < time() - 90) {

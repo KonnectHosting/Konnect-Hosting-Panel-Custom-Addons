@@ -1,4 +1,4 @@
-# GMod Toolkit 1.2.0
+# GMod Toolkit 1.3.0
 
 A single Panel addon: install through the existing Addon Manager dialog, then
 use the separate FastDL and Workshop server pages. It needs **no node changes or companion
@@ -7,10 +7,13 @@ frontend build and existing Wings/queue integrations do the work.
 
 ## Install through the Panel
 
-Paste this URL into **Addon Manager → Install addon → GitHub package URL**:
+This release is staged in the private repository. Once the owner makes the
+repository public, paste this pinned URL into **Addon Manager → Install addon →
+GitHub package URL**, or use the existing GMod Toolkit entry's **Update** action.
+The URL installer cannot fetch the archive while the repository is private:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/164aadb9d6235566dc7de1b34e96788ed901f49a
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/f669ac17cd6d7a98c91393988f108f7f61405e96
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -18,7 +21,7 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.2.0.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.3.0.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
 use **GMod Toolkit → Update**, the same addon ID `gmod.toolkit` and this version's immutable package URL.
@@ -28,20 +31,26 @@ On Arix, remove the old GMod Toolkit sidebar entry. From **Missing Links**, add
 **FastDL** (`/fastdl`) and **Workshop** (`/workshop`) to your conditional Garry's
 Mod category and save. The old `/gmod-toolkit` URL redirects to Workshop.
 
-Version 1.2.0 publishes only explicitly uploaded assets from
-`/home/container/fastdl/`. The customer FastDL page can create the upload folders
-through the existing Wings file connection. Game directories are left alone.
-FastDL and Workshop have independent pages and status requests; the mounting
-explanation and Startup link have been removed.
+Version 1.3.0 adds Steam artwork and metadata cards to the Workshop collection
+page, an explicit upload → preview → delivery → configuration workflow, and a
+Workshop addon builder for the dedicated `/home/container/fastdl/` uploads.
+Customers choose a name, description and cover, then download a real .gma addon
+in a private ZIP with publishing instructions. A generated default cover is
+included. Steam publishing happens on the customer's PC using their own account.
+No host, node or game-container service is installed.
 
 ## Customer tools
 
-- **Workshop:** collection IDs/links, recursive nested collections, duplicate and
+- **Workshop:** Steam artwork, titles, descriptions, sizes, subscriptions and
+  update dates in a responsive gallery; collection IDs/links, nested collections, duplicate and
   cycle removal, GMod app validation, item/Lua previews, private backups, previewed
   restoration and stale-edit rejection. No Steam credentials enter Lua or FastDL.
 - **FastDL:** private snapshots copied through Wings; asynchronous progress;
   exact added/changed/removed previews; `.bz2` compression and raw fallback;
   complete-generation publication; random URLs with rotate/revoke controls.
+- **Workshop addon export:** actual GMAD v3 with per-file/archive CRCs; custom
+  name, description and Steam-ready JPEG; private authenticated ZIP download;
+  incremental queue steps and crash-safe retries; customer-owned Steam publishing.
 - **Permissions:** actual server membership and file permissions, CSRF, two-factor,
   fresh authorization in queued work, and public download guards for enabled
   addons, eligible eggs and active servers.
@@ -71,10 +80,18 @@ Files/SFTP under the container's `fastdl/` directory:
 
 Keep game-relative names: `fastdl/maps/rp_example.bsp` is published at
 `<your-download-url>/maps/rp_example.bsp`. Compression is automatic. Preview the
-uploaded files, review the changes, then publish. The unique URL appears after
-the first successful publication, with copy buttons for the URL and settings
-for `/garrysmod/cfg/server.cfg`. Restart the game server or apply the settings
-in its console. Repeat preview/publication after changing uploads.
+uploaded files, review the changes, then choose a delivery method:
+
+- **FastDL website:** publish the snapshot and copy the provided settings into
+  `/garrysmod/cfg/server.cfg`. Save/reload the settings or restart the game server.
+  Uploading and publishing never enable FastDL automatically; sv_downloadurl
+  remains an explicit customer configuration step.
+- **Steam Workshop addon:** choose the name, description and cover, then build
+  and download the private ZIP. Use the included PUBLISHING.txt instructions to
+  upload addon.gma using gmpublish on your own PC, add it to your collection,
+  then sync/apply that collection from the Workshop page. Valve hosts the
+  published Workshop downloads. The Panel does not log into Steam or edit
+  collections on the customer's behalf.
 
 Updating preserves previous publications, their URLs and Workshop backups.
 Unfinished previews prepared from the old game directory are retired so a new
@@ -89,7 +106,7 @@ private snapshot is the object the customer previews and approves.
 
 ## Isolated validation compatibility
 
-Version 1.2.0 has no registered scheduler hook. Authorized status polling resumes
+Version 1.3.0 has no registered scheduler hook. Authorized status polling resumes
 only that server's interrupted work, with throttling and fresh worker permission
 checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
 starts telemetry registration, which queries a settings table absent from the
@@ -145,8 +162,8 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.2.0.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.2.0.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.3.0.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.3.0.zip.sha256)
 ```
 
 The original deployed probe is covered by an executable regression (a full Git
@@ -159,3 +176,27 @@ python3 packages/gmod-toolkit/tests/isolated-probe.py --vendor=/path/to/disposab
 This boots the real candidate with an empty SQLite database, no network,
 read-only source/dependencies and no telemetry override. It verifies handler,
 route and view checks complete using the unchanged installed probe.
+
+## Browser verification and format references
+
+The browser fixture builds the actual customer components with the native
+Tailwind stylesheet and synthetic API/store/permission adapters:
+
+```sh
+NODE_ENV=production \
+GMOD_TOOLKIT_BROWSER_STAGE=/absolute/path/to/disposable/frontend \
+GMOD_TOOLKIT_BROWSER_OUTPUT=/absolute/path/to/browser-results \
+node node_modules/webpack-cli/bin/cli.js --config packages/gmod-toolkit/tests/browser/webpack.cjs
+GMOD_TOOLKIT_BROWSER_OUTPUT=/absolute/path/to/browser-results \
+node packages/gmod-toolkit/tests/browser-smoke.cjs
+```
+
+Use Node 22 and Chromium. Screenshots/results stay outside the deployable package.
+The suite covers the collection grid, actual image loading, desktop/mobile
+layouts, cover conversion, custom metadata, private download handoff, read-only
+controls and the explicit server.cfg step. It does not publish anything on Steam.
+
+References: [FastDL guide](https://github.com/synchronocy/How-to-Setup-Fastdl)
+for the HTTP/resource-path workflow, and [Facepunch/gmad](https://github.com/Facepunch/gmad)
+for GMAD v3, lowercase paths, metadata, CRCs and publishing whitelist rules.
+The addon adds no Apache/FTP setup or node-side requirements.

@@ -306,13 +306,13 @@ test('thousands of explicitly uploaded assets are enumerated without reading gam
 test('manager guarded jobs resolve fresh actors and use the existing queue contract',function()use($app,$panel,$server){
     [$state,$source,$queue,$engine,$drain]=fastdlFixture();$app->instance(Fastdl::class,$engine);
     $manifest=json_decode(file_get_contents(dirname(__DIR__).'/addon/manifest.json'),true);
-    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.2.0','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($panel.'/storage/app/addon-manager/registry.json',json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.3.0','manifest'=>$manifest,'enabled'=>true]]]));
     $engine->preview($server,42);
     $extensions=$app->make(\AddonManager\Laravel\ExtensionRegistry::class);$count=0;
     while(count($queue)){
         if(++$count>100)throw new RuntimeException('Unbounded guarded queue chain');
         $payload=$queue[0];$queue->offsetUnset(0);$queue->exchangeArray(array_values($queue->getArrayCopy()));
-        $extensions->runJob('gmod.toolkit','1.2.0','fastdl-step',$payload);
+        $extensions->runJob('gmod.toolkit','1.3.0','fastdl-step',$payload);
     }
     same('preview-ready',$engine->info($server,42)['job']['status']);
 });
@@ -340,6 +340,9 @@ test('real bus serialization and standard queue execute the complete FastDL work
         $drain(); $preview = $engine->info($server, 42)['preview']; same(2, $preview['files']);
         $engine->publish($server, 42, $preview['preview']); $drain();
         same('complete', $engine->info($server, 42)['job']['status']);
+        $engine->preview($server, 42); $drain(); $preview = $engine->info($server, 42)['preview'];
+        $engine->buildAddon($server, 42, $preview['preview'], ['name' => 'Queued Workshop package', 'description' => 'Native manager job']);
+        $drain(); same('addon-ready', $engine->info($server, 42)['job']['status']);
         same(0, $queue->size('standard'));
     } finally { $app['config']->set('queue.default', 'redis'); }
 });
@@ -350,7 +353,7 @@ test('anonymous HTTP FastDL is limited to enabled approved asset snapshots', fun
     $app->instance(Fastdl::class,$engine);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'),true);
     $registry = $panel . '/storage/app/addon-manager/registry.json';
-    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.2.0','manifest'=>$manifest,'enabled'=>true]]]));
+    file_put_contents($registry,json_encode(['addons'=>['gmod.toolkit'=>['version'=>'1.3.0','manifest'=>$manifest,'enabled'=>true]]]));
     $kernel=$app->make(\Illuminate\Contracts\Http\Kernel::class);
     $request=\Illuminate\Http\Request::create('/fastdl/'.$token.'/maps/test.bsp','GET');
     $response=$kernel->handle($request); same(200,$response->getStatusCode()); same('application/octet-stream',$response->headers->get('Content-Type'));

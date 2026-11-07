@@ -31,13 +31,35 @@ final class ToolkitController
     public function workshopStatus(Request $request, Server $server): mixed
     {
         $this->access->check($request, $server);
-        return $this->reply(fn () => ['backups' => array_map(static fn ($entry) => ['id' => $entry['id'], 'created' => $entry['created']], $this->state->backups($server->uuid)), 'target' => WingsFiles::LUA]);
+        return $this->reply(fn () => ['backups' => array_map(static fn ($entry) => ['id' => $entry['id'], 'created' => $entry['created']], $this->state->backups($server->uuid)),
+            'target' => WingsFiles::LUA, 'collection' => $this->state->read('workshop-collection-' . $server->uuid)['result'] ?? null]);
     }
 
     public function fastdlStatus(Request $request, Server $server): mixed
     {
         $this->access->check($request, $server);
         return $this->reply(fn () => ['fastdl' => $this->fastdl->info($server, $request->user()->id)]);
+    }
+
+    public function cover(Request $request, Server $server): mixed
+    {
+        $this->access->check($request, $server);
+        return response(AddonPackage::cover(), 200, ['Content-Type' => 'image/jpeg', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, max-age=3600']);
+    }
+
+    public function buildAddon(Request $request, Server $server): mixed
+    {
+        $this->access->check($request, $server, true);
+        $data = $request->validate(['preview' => 'required|string|regex:/^[a-f0-9]{64}$/', 'name' => 'required|string|max:80',
+            'description' => 'present|nullable|string|max:5000', 'cover' => 'sometimes|nullable|string|max:1398104']);
+        return $this->reply(fn () => $this->fastdl->buildAddon($server, $request->user()->id, $data['preview'], $data));
+    }
+
+    public function downloadAddon(Request $request, Server $server, string $id): mixed
+    {
+        $this->access->check($request, $server, true);
+        $file = $this->fastdl->addonDownload($server, $request->user()->id, $id);
+        return response()->download($file['path'], $file['filename'], ['Content-Type' => 'application/zip', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store'])->setPrivate();
     }
 
     public function preview(Request $request, Server $server): mixed
@@ -53,10 +75,11 @@ final class ToolkitController
                 abort_unless($found, 404);
                 $result = ['lua' => $found['lua'], 'items' => [], 'duplicates' => 0, 'collections' => 0, 'restoring' => true];
             } else { $result = $this->workshop->resolve($data['collection']); }
+            $collection = isset($result['collection']) ? array_intersect_key($result, array_flip(['collection', 'title', 'bytes', 'knownSizes', 'items', 'collections', 'duplicates'])) : null;
             $id = bin2hex(random_bytes(32));
             // One pending preview per server bounds retained previews and prevents replay.
             $this->state->write('preview-' . $server->uuid, ['id' => $id, 'actor' => $request->user()->id, 'expires' => time() + 900,
-                'before' => $current === null ? null : hash('sha256', $current), 'lua' => $result['lua']]);
+                'before' => $current === null ? null : hash('sha256', $current), 'lua' => $result['lua'], 'collection' => $collection]);
             preg_match_all('/resource\.AddWorkshop\(\s*["\']([0-9]+)["\']\s*\)/', $current ?? '', $matches);
             $old = array_unique($matches[1]); $new = array_column($result['items'], 'id');
             return $result + ['preview' => $id, 'before' => $current, 'added' => array_values(array_diff($new, $old)), 'removed' => array_values(array_diff($old, $new)), 'target' => WingsFiles::LUA];
@@ -79,6 +102,7 @@ final class ToolkitController
                 $this->state->write('backups-' . $server->uuid, ['entries' => array_slice($backups, 0, 20)]);
             }
             $this->files->write($server, $preview['lua']);
+            $this->state->write('workshop-collection-' . $server->uuid, ['result' => $preview['collection'] ?? null]);
             $this->state->write('preview-' . $server->uuid, []);
             return ['message' => 'Workshop client-download Lua saved. Restart the game server when ready.'];
         }));

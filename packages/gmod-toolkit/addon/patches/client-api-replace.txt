@@ -5,6 +5,9 @@
         Route::get('/', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'status']);
         Route::get('/workshop', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'workshopStatus']);
         Route::get('/fastdl', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdlStatus']);
+        Route::get('/workshop/cover', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'cover']);
+        Route::post('/fastdl/addon', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'buildAddon']);
+        Route::get('/fastdl/addon/{id}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');
         Route::post('/workshop/preview', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'preview']);
         Route::post('/workshop/apply', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'apply']);
         Route::post('/fastdl/{action}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdl'])->where('action', 'prepare|preview|publish|rotate|revoke');

@@ -1,4 +1,4 @@
-# GMod Toolkit 1.2.0
+# GMod Toolkit 1.3.0
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
@@ -7,6 +7,13 @@ Customers have separate **FastDL** (`/fastdl`) and **Workshop** (`/workshop`)
 server pages. On Arix, remove the old GMod Toolkit sidebar entry and add both
 new routes from the Editor's Missing Links list to your conditional Garry's Mod
 category, then save. The old `/gmod-toolkit` bookmark redirects to Workshop.
+
+Workshop shows a responsive collection grid with the actual Steam thumbnail,
+title, description, download size, subscriber count and update date for each
+addon. Metadata can be unavailable; the UI labels missing values and uses the
+bundled generated cover as a fallback. Applied collections retain their gallery
+on refresh. Steam artwork loads directly in the browser from trusted HTTPS CDN
+hosts; no arbitrary image proxy is exposed.
 
 Workshop accepts Steam collection IDs/links, resolves nested GMod collections,
 removes duplicate/cyclic references and previews the item list, changes, old Lua
@@ -64,12 +71,44 @@ settings for `/garrysmod/cfg/server.cfg`. Save the settings and restart the game
 server, or apply the settings in its console now. Repeat preview/publication
 after source changes. Rotating the URL requires updating server.cfg again.
 
-Workshop handles Steam's collection response without depending on
-the optional file-details type field. It also uses Laravel's dispatcher contract
-with the manager's native guarded job wrapper, avoiding the installed manager's
-missing `bus` binding. No manager update is needed. Scan status reports inspected
-entries and remaining folders; delayed workers are identified and expired work
-can be retried instead of remaining running forever.
+## Choose FastDL or Workshop delivery
+
+The FastDL page guides customers through upload, private preview, delivery choice
+and game configuration. Publishing FastDL compresses only the approved snapshot.
+**Creating the folder, uploading files and publishing do not enable FastDL in
+the game. Customers must set `sv_downloadurl` in server.cfg**, save it and reload
+the settings/restart the game server. The tool never writes server.cfg. Optional
+resource.AddFile calls can be copied from the preview; their paths contain
+neither the fastdl/ prefix nor the .bz2 suffix.
+
+Alternatively, choose **Steam Workshop addon** after preparing a preview:
+
+1. Choose the addon name and description. Upload a JPEG, PNG or WebP cover, or
+   keep the generated default. The browser crops the cover to a 512 × 512 JPEG.
+2. Build the package. No FastDL publication is required. The existing Panel queue
+   verifies the private snapshot and builds a real CRC-checked GMAD v3 addon.
+3. Download the private ZIP containing `addon.gma`, `preview.jpg`, `addon.json`,
+   `description.txt` and `PUBLISHING.txt`. Only the creator with current file
+   permissions can download it. It expires after one hour; a new preview replaces it.
+4. Extract the ZIP on your PC and use Garry's Mod's **gmpublish** tool while
+   signed into your own Steam account. Publishing instructions are included.
+5. Add the published item to your Steam collection, reload that collection in
+   the Panel Workshop page, review/apply its client-download Lua and restart the
+   game server. Players then download that addon through Valve's CDN.
+
+The Panel performs packaging. Steam upload and collection editing occur in the
+customer's Steam account; the Panel never collects Steam passwords, sessions or
+Steam Guard codes. Choosing Workshop does not change existing FastDL settings.
+To use Workshop alone, the customer can clear their old sv_downloadurl setting
+once their Workshop downloads are working.
+
+GMA paths are lowercased to match the official publishing tool. Case collisions,
+empty assets and files outside the GMod publisher's whitelist fail with an
+explanation instead of producing a broken package. In particular, Workshop
+fonts must be .ttf under resource/fonts/; .otf and unused .sw/.360/.xbox.vtx
+variants cannot be exported. Failed builds preserve existing FastDL publications.
+The incremental writer processes one asset per queue step and retries safely
+without duplicating bytes. It needs only the existing Python 3 standard library.
 
 FastDL hosts
 resources requested by the game; custom assets may also need `resource.AddFile`
