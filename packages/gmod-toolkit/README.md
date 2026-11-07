@@ -1,19 +1,17 @@
-# GMod Toolkit 1.3.1
+# GMod Toolkit 1.4.0
 
 A single Panel addon: install through the existing Addon Manager dialog, then
-use the separate FastDL and Workshop server pages. It needs **no node changes or companion
+use the separate FastDL, Workshop and Backdoor Scanner server pages. It needs **no node changes or companion
 installation**. GMod eggs are recognized automatically. The manager's native
 frontend build and existing Wings/queue integrations do the work.
 
 ## Install through the Panel
 
-This release is staged in the private repository. Once the owner makes the
-repository public, paste this pinned URL into **Addon Manager → Install addon →
-GitHub package URL**, or use the existing GMod Toolkit entry's **Update** action.
-The URL installer cannot fetch the archive while the repository is private:
+Paste this pinned URL into **Addon Manager → Install addon → GitHub package
+URL**, or use the existing GMod Toolkit entry's **Update** action:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/f521144a43801e1dd072b113942f880873480950
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/97ff3108c84abb6ad9c9e5a1cb655ce468fc4497
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -21,23 +19,31 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.3.1.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.4.0.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
 use **GMod Toolkit → Update**, the same addon ID `gmod.toolkit` and this version's immutable package URL.
 Keep the existing private state; the manager reconstructs source and retains data.
 
 On Arix, remove the old GMod Toolkit sidebar entry. From **Missing Links**, add
-**FastDL** (`/fastdl`) and **Workshop** (`/workshop`) to your conditional Garry's
-Mod category and save. The old `/gmod-toolkit` URL redirects to Workshop.
+**FastDL** (`/fastdl`), **Workshop** (`/workshop`) and **Backdoor Scanner**
+(`/backdoor-scanner`) to your conditional Garry's Mod category and save. The old `/gmod-toolkit` URL redirects to Workshop.
 
-Version 1.3.1 automatically remembers each customer's Workshop collection for
-that server. Addon cards refresh when opening the page and through **Refresh
-collection**. Input saves after a short pause or leaving the field, independently
-of Lua previews or Apply. A temporary Steam failure retains the last gallery and
-shows a retry message. Viewing or refreshing never writes game files.
+Version 1.4.0 adds a private, read-only Backdoor Scanner. Customers start a scan,
+watch queued progress, expand severity-ranked file/line findings, filter results,
+and download a JSON report. Loose addon/Lua/gamemode/data files and plain or
+LZMA-compressed GMA/Workshop archives are inspected without running their code.
+The saved Workshop selection, gallery refresh and FastDL/content-pack tools are
+retained. There are no new host, node or game-container services to install.
 
 ## Customer tools
+
+- **Backdoor Scanner:** documented network/HTTP execution patterns, hidden
+  identity/rank grants, permission overrides, persistent loaders, suspicious
+  native/console access, literal obfuscation and historical channel indicators.
+  Context snippets and archive member paths explain each finding. Global/debug
+  access and ordinary HTTP calls are low priority, hidden by default. Reports
+  require existing server file-read permissions. No automatic deletion or edits.
 
 - **Workshop:** Steam artwork, titles, descriptions, sizes, subscriptions and
   update dates in a responsive gallery; collection IDs/links, nested collections, duplicate and
@@ -104,7 +110,7 @@ private snapshot is the object the customer previews and approves.
 
 ## Isolated validation compatibility
 
-Version 1.3.1 has no registered scheduler hook. Authorized status polling resumes
+Version 1.4.0 has no registered scheduler hook. Authorized status polling resumes
 only that server's interrupted work, with throttling and fresh worker permission
 checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
 starts telemetry registration, which queries a settings table absent from the
@@ -160,8 +166,8 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.3.1.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.3.1.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.4.0.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.4.0.zip.sha256)
 ```
 
 The original deployed probe is covered by an executable regression (a full Git
@@ -198,3 +204,18 @@ References: [FastDL guide](https://github.com/synchronocy/How-to-Setup-Fastdl)
 for the HTTP/resource-path workflow, and [Facepunch/gmad](https://github.com/Facepunch/gmad)
 for GMAD v3, lowercase paths, metadata, CRCs and publishing whitelist rules.
 The addon adds no Apache/FTP setup or node-side requirements.
+
+## Backdoor scanner verification and coverage
+
+Run `PYTHONDONTWRITEBYTECODE=1 python3 packages/gmod-toolkit/tests/scanner-rules.py`
+for the original synthetic detection/archive corpus. The Laravel suite also
+exercises queued scanning through real Addon Manager jobs and the native database
+queue, private results, authorization changes, cancellation/recovery and bounded
+Wings reads. Browser checks cover progress, severity, code escaping, filtering,
+low-priority indicators, saved results, cancellation and mobile layout.
+
+Read [SCAN-RULES.md](SCAN-RULES.md) for historical references, rules and precise
+coverage limits. This is a static review aid, not a guarantee or runtime monitor.
+Rules ship in versioned addon updates; there is no downloaded executable threat
+feed and the scanner does not contact payload URLs. The loading-screen feature
+is not included in this release.

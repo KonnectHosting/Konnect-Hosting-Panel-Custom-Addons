@@ -40,7 +40,18 @@ const preview = {
     removed: [],
     resources: ['maps/test.bsp', 'materials/example.vmt'],
 };
-const state = { phase: '', polls: 0, saved: false, selection: '', refreshes: 0, url: null, export: null, requests: [] };
+const state = {
+    phase: '',
+    polls: 0,
+    saved: false,
+    selection: '',
+    refreshes: 0,
+    url: null,
+    export: null,
+    scanner: '',
+    scanPolls: 0,
+    requests: [],
+};
 const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     if (url.pathname.startsWith('/thumbs/') || url.pathname.endsWith('/workshop/cover')) {
@@ -68,6 +79,97 @@ const server = http.createServer(async (request, response) => {
         response.setHeader('Content-Type', 'application/json');
         response.end(JSON.stringify(data));
     };
+    if (url.pathname.endsWith('/scanner/start')) {
+        state.scanner = 'running';
+        state.scanPolls = 0;
+        send({ status: 'running' });
+        return;
+    }
+    if (url.pathname.endsWith('/scanner/cancel')) {
+        state.scanner = 'cancelled';
+        send({ status: 'cancelled' });
+        return;
+    }
+    if (url.pathname.endsWith('/scanner')) {
+        ++state.scanPolls;
+        if (state.scanner === 'running' && state.scanPolls > 1) state.scanner = 'complete';
+        const done = state.scanner === 'complete';
+        const findings = [
+            {
+                file: '/garrysmod/addons/example/lua/server.lua',
+                member: '',
+                line: 27,
+                rule: 'network-execution',
+                severity: 'critical',
+                title: 'Network input is executed as Lua',
+                description: 'A network read feeds Lua execution. Review the server receiver and sender authorization.',
+                evidence: 'net.ReadString → RunString',
+                context: [
+                    { line: 26, text: '-- synthetic fixture' },
+                    { line: 27, text: 'RunString(net.ReadString()) -- <img src=x onerror="window.injected=true">' },
+                    { line: 28, text: 'end)' },
+                ],
+            },
+            {
+                file: '/garrysmod/addons/packed.gma',
+                member: 'lua/autorun/server/privileges.lua',
+                line: 12,
+                rule: 'identity-privilege',
+                severity: 'high',
+                title: 'Hardcoded identity near a privilege grant',
+                description:
+                    'Review this fixed identity and rank grant. This may be an intended whitelist or hidden author access.',
+                evidence: 'SetUserGroup',
+                context: [{ line: 12, text: 'player:SetUserGroup("superadmin")' }],
+            },
+            {
+                file: '/garrysmod/lua/library.lua',
+                member: '',
+                line: 8,
+                rule: 'environment-access',
+                severity: 'low',
+                title: 'Global or debug environment access',
+                description: 'Normal Lua libraries use these APIs too.',
+                evidence: '',
+                context: [{ line: 8, text: 'local value = _G[name]' }],
+            },
+        ];
+        send({
+            rulesVersion: '2026.11.07.1',
+            scan: state.scanner
+                ? {
+                      id: 'c'.repeat(64),
+                      status: state.scanner,
+                      phase: done ? 'inspect' : 'discover',
+                      started: new Date().toISOString(),
+                      finished: done ? new Date().toISOString() : null,
+                      current: '/garrysmod/addons/example/lua/server.lua',
+                      completed: done ? 3 : 0,
+                      total: 3,
+                      pendingDirectories: done ? 0 : 2,
+                      visited: 123,
+                      filesScanned: done ? 3 : 0,
+                      scripts: done ? 7 : 0,
+                      archives: done ? 1 : 0,
+                      bytes: 123456,
+                      uninspected: 1,
+                      issues: [
+                          { file: '/garrysmod/lua/bin/native.so', reason: 'Native binary cannot be inspected as Lua.' },
+                      ],
+                      findings: done ? findings : [],
+                      findingCount: done ? 3 : 0,
+                      truncated: false,
+                      partial: true,
+                      waiting: false,
+                      message: done
+                          ? 'Scan finished. Findings need review; no static scanner can prove that a server is safe.'
+                          : '',
+                      rulesVersion: '2026.11.07.1',
+                  }
+                : null,
+        });
+        return;
+    }
     if (url.pathname.endsWith('/workshop/selection')) {
         state.selection = body.collection;
         send({ input: state.selection });
@@ -314,7 +416,9 @@ const server = http.createServer(async (request, response) => {
         assert(state.refreshes > opened);
         const manual = state.refreshes;
         await click('Refresh collection');
-        await waitFor('[...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="Refresh collection"&&!e.disabled)');
+        await waitFor(
+            '[...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="Refresh collection"&&!e.disabled)'
+        );
         assert(state.refreshes > manual);
         assert.equal(
             state.requests.some((r) => r.path.endsWith('/workshop/apply')),
@@ -399,6 +503,33 @@ const server = http.createServer(async (request, response) => {
             false
         );
         results.push('read-only customers do not see mutating controls');
+        await load('scanner');
+        await click('Start scan');
+        await waitFor('document.body.textContent.includes("Scan finished")');
+        assert(await evaluate('document.body.textContent.includes("CRITICAL")'));
+        assert(await evaluate('document.body.textContent.includes("line 27")'));
+        assert(await evaluate('document.body.textContent.includes("Coverage is incomplete")'));
+        assert.equal(await evaluate('!!window.injected'), false);
+        assert.equal(await evaluate('document.body.textContent.includes("Global or debug environment access")'), false);
+        await screenshot('scanner-desktop.png');
+        results.push('scanner progress, severity, file/line context, escaped code and incomplete coverage');
+        await evaluate('document.querySelector("input[type=checkbox]").click()');
+        await waitFor('document.body.textContent.includes("Global or debug environment access")');
+        await value('#scan-filter', 'packed.gma');
+        await waitFor('document.body.textContent.includes("1 matching files")');
+        const scansStarted = state.requests.filter((r) => r.path.endsWith('/scanner/start')).length;
+        await load('scanner', 390);
+        await waitFor('document.body.textContent.includes("Scan finished")');
+        await click('Refresh results');
+        assert.equal(state.requests.filter((r) => r.path.endsWith('/scanner/start')).length, scansStarted);
+        assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth'));
+        await screenshot('scanner-mobile.png');
+        results.push('scanner filters, optional low indicators, saved report/manual refresh and mobile overflow');
+        await click('Run a new scan');
+        await click('Cancel scan');
+        await waitFor('document.body.textContent.includes("cancelled")');
+        assert(state.requests.every((r) => !/delete|quarantine|execute/.test(r.path)));
+        results.push('scanner cancellation and no automatic code execution, deletion or quarantine endpoints');
         assert(state.requests.every((request) => !request.path.includes('/files/write')));
         results.push('workflow never changes server.cfg automatically');
         fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ passed: true, checks: results }, null, 2));

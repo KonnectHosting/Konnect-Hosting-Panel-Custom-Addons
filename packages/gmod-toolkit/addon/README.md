@@ -1,12 +1,41 @@
-# GMod Toolkit 1.3.1
+# GMod Toolkit 1.4.0
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
 GMod eggs are recognized automatically by egg name or the trusted `-game garrysmod` startup template. Optional admin settings support custom egg names.
-Customers have separate **FastDL** (`/fastdl`) and **Workshop** (`/workshop`)
-server pages. On Arix, remove the old GMod Toolkit sidebar entry and add both
+Customers have separate **FastDL** (`/fastdl`), **Workshop** (`/workshop`) and
+**Backdoor Scanner** (`/backdoor-scanner`) server pages. On Arix, remove the old GMod Toolkit sidebar entry and add the
 new routes from the Editor's Missing Links list to your conditional Garry's Mod
 category, then save. The old `/gmod-toolkit` bookmark redirects to Workshop.
+
+Backdoor Scanner runs an asynchronous, static scan through the existing Wings
+file API and Panel queue. It reads installed addon, Lua, gamemode/data and
+Workshop-cache files, including plain and LZMA-compressed GMA archives. Findings
+include severity, file/member path, source line/context, rule and explanation.
+Customers can filter, show optional low-priority indicators, cancel, refresh and
+download the latest report. Results are private, retained across page loads and
+available only with both file.read and file.read-content permissions. Queued
+work rechecks the requesting user's permissions and server state.
+
+Rules cover network-to-Lua execution, HTTP execution callbacks, privilege grants,
+fixed-identity allow decisions, changed authorization functions, sensitive console
+commands, persistent script writes, encoded/indirect execution and historical
+channel indicators. Common global/debug access and HTTP requests are low priority.
+Legitimate admin frameworks and DRM can match; findings require manual review.
+No code being scanned is executed, no payload URL is contacted, and no server
+file is modified or deleted. No addon name or framework folder is blanket trusted.
+
+Coverage: .lua, .txt, .cfg, .vmt, .json, .dat and .js; GMA v1/v2/v3 and LZMA-alone
+Workshop archives. Platform/runtime trees are excluded. Native binaries, bytecode,
+unsupported archives, symbolic links, changed/unreadable files and limits produce
+explicit uninspected/incomplete results. Limits: 2 MiB/text file, 1 GiB/archive
+(including expanded size), 4 GiB transferred, 20,000 candidate files, 100,000
+entries, 10,000 directories and 2 hours. Archive processing has separate bounded
+entry/analysis limits. At most 500 findings and 200 coverage details are retained;
+truncation is shown. Static analysis can miss dynamic/cross-file obfuscation,
+native behavior and code downloaded after a scan. Zero findings is not a clean
+bill of health. Reports describe files as read, not an atomic server snapshot.
+Rules are bundled and updated with the addon, not a live malware feed.
 
 Workshop shows a responsive collection grid with the actual Steam thumbnail,
 title, description, download size, subscriber count and update date for each

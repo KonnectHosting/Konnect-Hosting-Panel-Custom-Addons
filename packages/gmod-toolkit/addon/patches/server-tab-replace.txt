@@ -1,5 +1,12 @@
     server: [
         {
+            path: '/backdoor-scanner',
+            permission: 'file.read-content',
+            name: 'Backdoor Scanner',
+            component: lazy(() => import('@/components/server/gmodToolkit/ScannerContainer')),
+            exact: true,
+        },
+        {
             path: '/fastdl',
             permission: 'file.read-content',
             name: 'FastDL',

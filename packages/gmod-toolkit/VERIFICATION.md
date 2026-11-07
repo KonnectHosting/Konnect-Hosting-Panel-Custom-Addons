@@ -1,4 +1,4 @@
-# GMod Toolkit 1.3.1 verification
+# GMod Toolkit 1.4.0 verification
 
 Contract: Addon Manager 2.0.1 source 5a899b28aa80b08f3ab8a5cbae3e5315cc5c2563;
 repository baseline 43927ae7c65e4e8578f9cfd63ffb4d62e60f1ad5. Runtime tests
@@ -7,6 +7,23 @@ and synthetic hosting data. No production Panel, node, container or Proxmox
 configuration was modified.
 
 ## Executed checks
+
+- Backdoor Scanner: 27 synthetic lexical/rule/archive regressions cover direct
+  network execution, aliased/protected calls, simple variable flows, HTTP
+  callbacks, fixed-identity privilege/allow decisions, rank-table writes,
+  permission overrides, literal encoding/concatenation, persistence, sensitive
+  commands, credential-transfer indicators, historical receiver names, benign
+  comments/strings/globals, Unicode, native modules and bytecode. GMA v1/v2/v3,
+  LZMA-alone, member paths/CRC/bounds, malformed archives and CLI non-execution
+  are checked. Late critical evidence replaces weaker findings at limits.
+- Scanner Laravel tests cover private results, read-only source preservation,
+  ordinary and archive inputs, explicit incomplete coverage, report caps with
+  late critical evidence, current actor/server permissions, replay, cancellation,
+  interrupted work, expiry, queue rejection, bounded actual Wings GET contracts
+  and reported-link/path rejection. The real database-backed standard queue
+  executes native guarded scanner-step jobs end to end. No malware/payload URL
+  is contacted. This corpus does not measure real-world detection rates; see
+  [SCAN-RULES.md](SCAN-RULES.md) for sources, rules and precise exclusions.
 
 - Workshop artwork/metadata: trusted Steam CDN URL validation, HTTPS upgrades,
   bounded plain-text descriptions, size totals and missing-value handling.
@@ -22,13 +39,15 @@ configuration was modified.
   wrong actors/servers, permission changes, expiration and replaced previews are
   rejected. Replayed partial appends finish without duplicate bytes. Failed
   exports preserve HTTP publications, and public FastDL URLs cannot serve archives.
-- Ten Chromium checks run the actual customer components/native Tailwind with
+- Thirteen Chromium checks run the actual customer components/native Tailwind with
   synthetic transport/store/permission adapters: six gallery columns at 1600px,
   two at 390px, loaded thumbnails, escaped metadata, autosaved input, fresh page-open/manual refreshes without Lua
   application, applied gallery persistence,
   folder/preview flow, chosen name/description/image, PNG → 512px JPEG cover,
   authenticated package URL, mobile overflow, read-only controls and no server.cfg
-  writes. Screenshots and results are retained in the disposable browser output.
+  writes. Scanner checks add queued progress, severity/file/line context,
+  escaped code, incomplete coverage, filters/low-priority indicators, report
+  persistence/manual refresh, cancellation and mobile overflow. Screenshots and results are retained in the disposable browser output.
   This is not a test against a live Panel session or a Steam publishing account.
 
 - Dedicated upload-root regression: existing Wings API calls read only `/fastdl`
@@ -46,16 +65,16 @@ configuration was modified.
 
 - Reproduced the reported missing settings/app:telemetry:uuid failure with 1.1.0
   and the original 2.0.1 probe in a networkless, read-only container with an empty
-  temporary SQLite database. Version 1.3.1 passes that unchanged probe: 2 handler
+  temporary SQLite database. Version 1.4.0 passes that unchanged probe: 3 handler
   classes, 2 extension routes, 1 page, 0 schedules; Laravel boot and PHP lint pass.
   tests/isolated-probe.py makes this regression repeatable.
 - The repository's generic probe now disables host telemetry only inside its
   synthetic process so legitimate scheduled addons can be inspected without
   production settings. The previous scheduled 1.1.0 candidate passes the fixed
-  probe (1 schedule). The delivered 1.3.1 addon does not require this manager patch.
+  probe (1 schedule). The delivered 1.4.0 addon does not require this manager patch.
 
 - SDK validation, PHP syntax, source/fragment hashes and SDK export round trip.
-- 43 Panel/Workshop/FastDL tests: nested/cyclic Workshop collections, safe Lua,
+- 51 Panel/Workshop/FastDL/scanner tests: nested/cyclic Workshop collections, safe Lua,
   hostile IDs/links, wrong-game/private items, real Panel owner/subuser policy,
   CSRF, two-factor, server membership/suspension, Lua updates via the actual
   Wings write contract, backup/restore, stale previews and enabled-version guards.
@@ -88,21 +107,21 @@ configuration was modified.
   install, same-ID update, disable, re-enable, delete, retained private data and
   source drift failure. Fixture build/verifier callbacks are test doubles, not
   production isolation attestations.
-  The staged 1.3.0 publication archive was also installed and upgraded to 1.3.1
+  The staged 1.3.1 publication archive was also installed and upgraded to 1.4.0
   in all three variants, checking reconstruction of the changed route patches
-  and the new saved-selection route/file.
+  and the new scanner route/files/job registration.
 - Stock native frontend: full TypeScript, targeted ESLint and production webpack
-  build were rerun for 1.3.1. Prior 1.3.0 Arix before/after type comparisons introduced zero errors; full Arix
+  build were rerun for 1.4.0. Prior 1.3.0 Arix before/after type comparisons introduced zero errors; full Arix
   compilation is not claimed because the root dependency set omits theme
   dependencies (92/100 existing baseline errors). The live host must retain its
   existing matched frozen theme dependencies.
-- Full repository archive extraction and package-folder selection through the
-  matching SDK, including the standalone publication root. The built SDK archive
-  and a GitHub-shaped archive from the pushed root commit are importable. Remote
-  commit identity is checked. The repository currently reports private visibility
-  and its unauthenticated package download returns 404; public download validation
-  is deferred until the owner makes it public.
-  Publication: f521144a43801e1dd072b113942f880873480950.
+- Standalone publication: SDK export and the actual unauthenticated GitHub
+  codeload archive are imported through the matching SDK, validating root
+  discovery, manifest identity and declared bytes. The repository reports public
+  visibility and the published archive downloads successfully. Source, standalone
+  tree and SDK payload bytes are checked for equality; remote commit identity
+  is checked after push.
+  Publication: 97ff3108c84abb6ad9c9e5a1cb655ce468fc4497.
 
 ## Live checks still outside this environment
 
@@ -116,3 +135,8 @@ The GMA format follows Facepunch/gmad's writer, metadata and whitelist sources.
 Steam acceptance/visibility/moderation, customer authentication, collection edits
 and actual game-client Workshop downloads are not asserted by local archive tests.
 The Panel exports a publishing package; it does not perform those Steam actions.
+
+Scanner validation also needs a representative, licensed benign/malicious addon
+corpus on the intended host before publishing detection-rate claims. No verified
+original GBombs sample was available; this release detects documented behavior
+rather than making a name-based or hash-based verdict on current reuploads.

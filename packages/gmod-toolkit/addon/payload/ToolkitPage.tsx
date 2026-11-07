@@ -21,7 +21,7 @@ export function formatBytes(bytes?: number | null): string {
 const errorMessage = (error: unknown) =>
     (error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? httpErrorToHuman(error);
 
-export function useToolkit<T>(page: 'workshop' | 'fastdl', poll = false) {
+export function useToolkit<T>(page: 'workshop' | 'fastdl' | 'scanner', poll = false) {
     const uuid = ServerContext.useStoreState((state) => state.server.data!.uuid);
     const id = ServerContext.useStoreState((state) => state.server.data!.id);
     const base = `/api/client/servers/${uuid}/gmod-toolkit`;

@@ -76,5 +76,5 @@ with tempfile.TemporaryDirectory(prefix='gmod-original-probe-') as temporary:
         raise SystemExit(result.stderr + result.stdout)
     report = json.loads(result.stdout)
     assert report['passed'] is True and report['laravelBoot'] is True and report['schedules'] == 0
-    assert report['handlerClasses'] == 2 and report['routes'] == 2 and report['pages'] == 1
+    assert report['handlerClasses'] == 3 and report['routes'] == 2 and report['pages'] == 1
     print(json.dumps({'originalProbe': True, 'emptySyntheticDatabase': True, 'checks': report}))

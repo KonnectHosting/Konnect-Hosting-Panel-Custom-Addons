@@ -27,7 +27,7 @@ final class AssetPolicy
 
     public static function ordinary(array $row, bool $directory = false): bool
     {
-        return !($row['symlink'] ?? $row['is_symlink'] ?? false)
+        return !($row['symlink'] ?? false) && !($row['is_symlink'] ?? false)
             && str_starts_with((string) ($row['mode'] ?? ''), $directory ? 'd' : '-');
     }
 }

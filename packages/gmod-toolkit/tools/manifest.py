@@ -37,6 +37,9 @@ specs = [
         Route::get('/workshop', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'workshopStatus']);
         Route::get('/fastdl', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdlStatus']);
         Route::get('/workshop/cover', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'cover']);
+        Route::get('/scanner', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'status']);
+        Route::post('/scanner/start', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'start']);
+        Route::post('/scanner/cancel', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'cancel']);
         Route::post('/workshop/selection', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'selection']);
         Route::post('/fastdl/addon', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'buildAddon']);
         Route::get('/fastdl/addon/{id}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');
@@ -47,6 +50,13 @@ specs = [
 """),
     ('server-tab', 'resources/scripts/routers/routes.ts', '    server: [\n',
      """        {
+            path: '/backdoor-scanner',
+            permission: 'file.read-content',
+            name: 'Backdoor Scanner',
+            component: lazy(() => import('@/components/server/gmodToolkit/ScannerContainer')),
+            exact: true,
+        },
+        {
             path: '/fastdl',
             permission: 'file.read-content',
             name: 'FastDL',
@@ -88,8 +98,8 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.3.1',
-    'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.4.0',
+    'description': 'Workshop, Panel-hosted FastDL and private static backdoor scans using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,
     'extensions': {
@@ -98,7 +108,8 @@ manifest = {
         'routes': [
             {'id': 'settings-save', 'path': 'settings/save', 'method': 'POST', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\AdminController@save', 'permission': 'admin'},
         ],
-        'jobs': [{'id': 'fastdl-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@handle', 'permission': 'system'}],
+        'jobs': [{'id': 'fastdl-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@handle', 'permission': 'system'},
+                 {'id': 'scanner-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\BackdoorScanner@handle', 'permission': 'system'}],
     },
     'database': {'dataPolicy': 'preserve', 'migrations': []},
     'build': {'mode': 'panel', 'profile': 'panel-v1', 'outputs': ['public/assets']},
