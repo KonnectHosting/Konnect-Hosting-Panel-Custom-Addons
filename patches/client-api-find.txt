@@ -1,0 +1,1 @@
+    Route::get('/resources', Client\Servers\ResourceUtilizationController::class)->name('api:client:server.resources');
