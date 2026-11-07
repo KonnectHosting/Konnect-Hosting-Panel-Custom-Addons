@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-use Pterodactyl\Addons\GmodToolkit\{Workshop,AddonPackage,Access,ToolkitController};
+use Pterodactyl\Addons\GmodToolkit\{Workshop,WorkshopView,State,AddonPackage,Access,ToolkitController};
 
 function gmaRead(string $bytes): array {
     same('GMAD' . chr(3), substr($bytes, 0, 5)); $offset = 21;
@@ -41,7 +41,47 @@ test('Workshop cards expose trusted artwork and bounded metadata without HTML or
     unset($fixture['101']['metadata']);
 });
 
-test('applied collections keep their card metadata after refresh and backup restoration clears stale cards', function () use ($controller, $server, $owner, $files, $state) {
+test('collection selection saves without Lua writes, refreshes current Steam metadata and is isolated by customer and server', function () use ($controller, $server, $owner, $reader, $stranger, $files, &$fixture) {
+    $writes = $files->writes;
+    reject(fn () => $controller->selection(requestFor($stranger, ['collection' => '100']), $server), 403);
+    $input = 'https://steamcommunity.com/sharedfiles/filedetails/?id=100';
+    same($input, $controller->selection(requestFor($reader, ['collection' => $input]), $server)->getData(true)['input']);
+    $first = $controller->workshopStatus(requestFor($reader), $server)->getData(true);
+    same($input, $first['input']); same(['101','102'], array_column($first['collection']['items'], 'id'));
+    same(false, isset($first['collection']['lua'])); same(null, $first['refreshError']);
+    $fixture['101']['metadata'] = ['file_size' => '12345'];
+    same(12345, $controller->workshopStatus(requestFor($reader), $server)->getData(true)['collection']['items'][0]['bytes']);
+    $controller->selection(requestFor($owner, ['collection' => '200']), $server);
+    same($input, $controller->workshopStatus(requestFor($reader), $server)->getData(true)['input']);
+    $other = clone $server; $other->uuid = '87654321-1234-1234-1234-123456789abc';
+    same('', $controller->workshopStatus(requestFor($owner), $other)->getData(true)['input']);
+    $fixture['102']['result'] = 9;
+    $failed = $controller->workshopStatus(requestFor($reader), $server)->getData(true);
+    same($input, $failed['input']); same(12345, $failed['collection']['items'][0]['bytes']); same(true, is_string($failed['refreshError']));
+    unset($fixture['102']['result']);
+    unset($fixture['101']['metadata']);
+    $controller->selection(requestFor($reader, ['collection' => null]), $server);
+    $empty = $controller->workshopStatus(requestFor($reader), $server)->getData(true);
+    same('', $empty['input']); same(null, $empty['collection']); same(null, $empty['refreshError']);
+    same($writes, $files->writes);
+});
+
+test('a slow Steam refresh cannot overwrite a newer saved selection and invalid drafts stay saved', function () use ($panel, $fetch) {
+    $state = new State($panel . '/storage/app/gmod-view-race-' . bin2hex(random_bytes(6)));
+    $view = null; $changed = false;
+    $workshop = new Workshop(function ($method, $ids) use ($fetch, &$view, &$changed) {
+        if (!$changed) { $changed = true; $view->save('server', 42, '200'); }
+        return $fetch($method, $ids);
+    });
+    $view = new WorkshopView($state, $workshop); $view->save('server', 42, '100');
+    $status = $view->status('server', 42); same('200', $status['input']); same(null, $status['collection']);
+    $view->save('server', 42, 'https://steamcommunity.com/unfinished');
+    $status = $view->status('server', 42); same('https://steamcommunity.com/unfinished', $status['input']);
+    same(true, is_string($status['refreshError'])); same(null, $status['collection']);
+});
+
+test('saved collection cards survive Lua apply and backup restoration', function () use ($controller, $server, $owner, $files, $state) {
+    $controller->selection(requestFor($owner, ['collection' => '100']), $server);
     $files->current = 'resource.AddWorkshop("101")';
     $preview = $controller->preview(requestFor($owner, ['collection' => '100']), $server)->getData(true);
     $controller->apply(requestFor($owner, ['preview' => $preview['preview']]), $server);
@@ -50,7 +90,7 @@ test('applied collections keep their card metadata after refresh and backup rest
     $backup = $state->backups($server->uuid)[0]['id'];
     $restore = $controller->preview(requestFor($owner, ['backup' => $backup]), $server)->getData(true);
     $controller->apply(requestFor($owner, ['preview' => $restore['preview']]), $server);
-    same(null, $controller->workshopStatus(requestFor($owner), $server)->getData(true)['collection']);
+    same('100', $controller->workshopStatus(requestFor($owner), $server)->getData(true)['collection']['collection']);
 });
 
 test('Workshop export builds an actual CRC-verified GMA v3 and valid ZIP with chosen metadata and cover', function () use ($server, $owner, $workshop) {

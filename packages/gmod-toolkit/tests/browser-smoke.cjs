@@ -40,7 +40,7 @@ const preview = {
     removed: [],
     resources: ['maps/test.bsp', 'materials/example.vmt'],
 };
-const state = { phase: '', polls: 0, saved: false, url: null, export: null, requests: [] };
+const state = { phase: '', polls: 0, saved: false, selection: '', refreshes: 0, url: null, export: null, requests: [] };
 const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     if (url.pathname.startsWith('/thumbs/') || url.pathname.endsWith('/workshop/cover')) {
@@ -68,6 +68,11 @@ const server = http.createServer(async (request, response) => {
         response.setHeader('Content-Type', 'application/json');
         response.end(JSON.stringify(data));
     };
+    if (url.pathname.endsWith('/workshop/selection')) {
+        state.selection = body.collection;
+        send({ input: state.selection });
+        return;
+    }
     if (url.pathname.endsWith('/workshop/preview')) {
         send({
             ...collection,
@@ -85,10 +90,14 @@ const server = http.createServer(async (request, response) => {
         return;
     }
     if (url.pathname.endsWith('/workshop')) {
+        ++state.refreshes;
         send({
+            input: state.selection,
+            refreshedAt: state.selection ? new Date().toISOString() : null,
+            refreshError: null,
             backups: [],
             target: '/garrysmod/lua/autorun/server/gmod_toolkit_workshop.lua',
-            collection: state.saved ? collection : null,
+            collection: state.selection ? collection : null,
         });
         return;
     }
@@ -279,7 +288,6 @@ const server = http.createServer(async (request, response) => {
         await send('DOM.enable');
         await load('workshop');
         await value('#workshop-collection', '99999');
-        await click('Load collection');
         await waitFor('document.querySelectorAll("article").length===12');
         await waitFor(
             '[...document.querySelectorAll("article img")].slice(0,6).every(e=>e.complete&&e.naturalWidth>0)'
@@ -293,6 +301,29 @@ const server = http.createServer(async (request, response) => {
         assert.equal(await evaluate('!!window.injected'), false);
         await screenshot('workshop-desktop.png');
         results.push('desktop collection cards: 6 columns, artwork, metadata, escaped text');
+        assert.equal(state.selection, '99999');
+        assert.equal(
+            state.requests.some((r) => r.path.endsWith('/workshop/preview') || r.path.endsWith('/workshop/apply')),
+            false
+        );
+        results.push('collection input autosaves and loads cards without a Lua preview or file write');
+        const opened = state.refreshes;
+        await load('workshop');
+        await waitFor('document.querySelectorAll("article").length===12');
+        assert.equal(await evaluate('document.querySelector("#workshop-collection").value'), '99999');
+        assert(state.refreshes > opened);
+        const manual = state.refreshes;
+        await click('Refresh collection');
+        await waitFor('[...document.querySelectorAll("button")].some(e=>e.textContent.trim()==="Refresh collection"&&!e.disabled)');
+        assert(state.refreshes > manual);
+        assert.equal(
+            state.requests.some((r) => r.path.endsWith('/workshop/apply')),
+            false
+        );
+        results.push(
+            'reopening restores saved input and refreshes cards; manual Refresh fetches again without applying Lua'
+        );
+        await click('Preview download Lua');
         await click('Back up and apply download Lua');
         await waitFor('document.body.textContent.includes("Download Lua saved")');
         assert.equal(await evaluate('document.querySelectorAll("article").length'), 12);

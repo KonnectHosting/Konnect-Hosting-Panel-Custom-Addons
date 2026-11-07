@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import http from '@/api/http';
 import Can from '@/components/elements/Can';
 import ToolkitPage, { useToolkit, button, secondary, box, field, code } from './ToolkitPage';
@@ -7,6 +7,9 @@ import WorkshopCards, { WorkshopCollection } from './WorkshopCards';
 interface Status {
     backups: { id: string; created: string }[];
     target: string;
+    input: string;
+    refreshedAt?: string | null;
+    refreshError?: string | null;
     collection?: WorkshopCollection | null;
 }
 interface LuaPreview extends WorkshopCollection {
@@ -19,17 +22,71 @@ interface LuaPreview extends WorkshopCollection {
 }
 
 export default () => {
-    const { base, status, busy, error, notice, run, refresh, setNotice } = useToolkit<Status>('workshop');
+    const { base, status, busy, error, notice, run, refresh, setNotice, setError } = useToolkit<Status>('workshop');
     const [collection, setCollection] = useState('');
     const [preview, setPreview] = useState<LuaPreview>();
+    const [saving, setSaving] = useState(false);
+    const edited = useRef(false);
+    const revision = useRef(0);
+    const queue = useRef<Promise<void>>(Promise.resolve());
+    const timer = useRef<number>();
+    const autosaved = useRef(-1);
     useEffect(() => {
+        edited.current = false;
+        ++revision.current;
         setCollection('');
         setPreview(undefined);
+        setSaving(false);
+        return () => {
+            ++revision.current;
+        };
     }, [base]);
     useEffect(() => {
-        if (status?.collection?.collection) setCollection((current) => current || status.collection!.collection!);
+        if (status && !edited.current) setCollection(status.input);
     }, [status]);
-    const displayed = preview?.restoring ? undefined : preview || status?.collection;
+    // Serialize saves so a slower earlier request cannot replace newer input.
+    const persist = useCallback(
+        (input: string, version: number) => {
+            const task = queue.current
+                .catch(() => undefined)
+                .then(async () => {
+                    if (version !== revision.current) return;
+                    await http.post(`${base}/workshop/selection`, { collection: input });
+                    if (version === revision.current) await refresh(() => version === revision.current);
+                });
+            queue.current = task;
+            return task;
+        },
+        [base, refresh]
+    );
+    const autosave = useCallback(
+        (input: string, version: number) => {
+            if (autosaved.current === version) return;
+            autosaved.current = version;
+            setSaving(true);
+            setError('');
+            persist(input, version)
+                .catch(() => {
+                    if (version === revision.current) {
+                        autosaved.current = -1;
+                        setError('Could not save or refresh your collection. Use Refresh to retry.');
+                    }
+                })
+                .finally(() => {
+                    if (version === revision.current) setSaving(false);
+                });
+        },
+        [persist, setError]
+    );
+    useEffect(() => {
+        if (!edited.current) return;
+        const version = revision.current;
+        timer.current = window.setTimeout(() => autosave(collection, version), 700);
+        return () => window.clearTimeout(timer.current);
+    }, [collection, autosave]);
+    const displayed = preview?.restoring
+        ? undefined
+        : preview || (status?.input === collection.trim() ? status.collection : undefined);
     const load = () =>
         run(async () => {
             setPreview(undefined);
@@ -67,19 +124,52 @@ export default () => {
                         value={collection}
                         maxLength={1024}
                         onChange={(event) => {
+                            edited.current = true;
+                            ++revision.current;
+                            setSaving(true);
                             setCollection(event.target.value);
                             setPreview(undefined);
                         }}
+                        onBlur={() => {
+                            if (!edited.current) return;
+                            window.clearTimeout(timer.current);
+                            autosave(collection, revision.current);
+                        }}
                         placeholder={'https://steamcommunity.com/sharedfiles/filedetails/?id=123456789'}
                     />
-                    <button className={button} disabled={busy || !collection.trim()} onClick={load}>
-                        {busy ? 'Working…' : 'Load collection'}
+                    <button
+                        className={secondary}
+                        disabled={busy || saving}
+                        onClick={() => {
+                            window.clearTimeout(timer.current);
+                            setPreview(undefined);
+                            run(async () => {
+                                if (edited.current) await persist(collection, revision.current);
+                                else await refresh();
+                            });
+                        }}
+                    >
+                        {saving ? 'Saving and refreshing…' : busy ? 'Working…' : 'Refresh collection'}
                     </button>
                 </div>
                 <p className={'text-xs text-neutral-300'}>
                     The collection ID is the number after id= in its Steam URL. Nested collections are resolved
-                    automatically.
+                    automatically. Your selection is saved automatically and refreshed each time you open this page.
                 </p>
+                {status?.refreshError && status.input === collection.trim() && (
+                    <p role={'alert'} className={'text-sm text-yellow-200 mt-3'}>
+                        {status.collection ? 'Showing the last successful refresh. ' : ''}
+                        {status.refreshError}
+                    </p>
+                )}
+                {status?.refreshedAt && status.input === collection.trim() && (
+                    <p className={'text-xs text-neutral-300 mt-2'}>
+                        Last refreshed {new Date(status.refreshedAt).toLocaleString()}
+                    </p>
+                )}
+                <button className={button} disabled={busy || saving || !collection.trim()} onClick={load}>
+                    Preview download Lua
+                </button>
                 {displayed?.title && <h2 className={'text-lg font-semibold mt-5'}>{displayed.title}</h2>}
                 {preview && (
                     <div className={'mt-5 rounded border border-neutral-500 bg-neutral-800 p-4'}>
@@ -126,7 +216,11 @@ export default () => {
                 )}
                 {!displayed && !preview && (
                     <div className={'py-10 text-center text-neutral-300'}>
-                        Load a collection to see its addons, artwork and download sizes.
+                        {!status
+                            ? 'Refreshing your saved collection…'
+                            : saving
+                            ? 'Saving your selection and loading its addons…'
+                            : 'Enter a collection to see its addons, artwork and download sizes.'}
                     </div>
                 )}
                 {displayed && <WorkshopCards collection={displayed} fallback={`${base}/workshop/cover`} />}

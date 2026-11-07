@@ -1,4 +1,4 @@
-# GMod Toolkit 1.3.0
+# GMod Toolkit 1.3.1
 
 A single Panel addon: install through the existing Addon Manager dialog, then
 use the separate FastDL and Workshop server pages. It needs **no node changes or companion
@@ -13,7 +13,7 @@ GitHub package URL**, or use the existing GMod Toolkit entry's **Update** action
 The URL installer cannot fetch the archive while the repository is private:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/f669ac17cd6d7a98c91393988f108f7f61405e96
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/f521144a43801e1dd072b113942f880873480950
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -21,7 +21,7 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.3.0.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.3.1.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
 use **GMod Toolkit → Update**, the same addon ID `gmod.toolkit` and this version's immutable package URL.
@@ -31,13 +31,11 @@ On Arix, remove the old GMod Toolkit sidebar entry. From **Missing Links**, add
 **FastDL** (`/fastdl`) and **Workshop** (`/workshop`) to your conditional Garry's
 Mod category and save. The old `/gmod-toolkit` URL redirects to Workshop.
 
-Version 1.3.0 adds Steam artwork and metadata cards to the Workshop collection
-page, an explicit upload → preview → delivery → configuration workflow, and a
-Workshop addon builder for the dedicated `/home/container/fastdl/` uploads.
-Customers choose a name, description and cover, then download a real .gma addon
-in a private ZIP with publishing instructions. A generated default cover is
-included. Steam publishing happens on the customer's PC using their own account.
-No host, node or game-container service is installed.
+Version 1.3.1 automatically remembers each customer's Workshop collection for
+that server. Addon cards refresh when opening the page and through **Refresh
+collection**. Input saves after a short pause or leaving the field, independently
+of Lua previews or Apply. A temporary Steam failure retains the last gallery and
+shows a retry message. Viewing or refreshing never writes game files.
 
 ## Customer tools
 
@@ -106,7 +104,7 @@ private snapshot is the object the customer previews and approves.
 
 ## Isolated validation compatibility
 
-Version 1.3.0 has no registered scheduler hook. Authorized status polling resumes
+Version 1.3.1 has no registered scheduler hook. Authorized status polling resumes
 only that server's interrupted work, with throttling and fresh worker permission
 checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
 starts telemetry registration, which queries a settings table absent from the
@@ -162,8 +160,8 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.3.0.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.3.0.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.3.1.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.3.1.zip.sha256)
 ```
 
 The original deployed probe is covered by an executable regression (a full Git

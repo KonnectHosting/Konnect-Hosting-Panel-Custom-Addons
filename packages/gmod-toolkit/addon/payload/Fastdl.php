@@ -14,7 +14,7 @@ use Symfony\Component\Process\Process;
 
 class Fastdl
 {
-    public const VERSION = '1.3.0';
+    public const VERSION = '1.3.1';
     private Closure $enqueue;
 
     public function __construct(private State $state, private AssetSource $source, private Access $access, ?Closure $enqueue = null)

@@ -1,4 +1,4 @@
-# GMod Toolkit 1.3.0 verification
+# GMod Toolkit 1.3.1 verification
 
 Contract: Addon Manager 2.0.1 source 5a899b28aa80b08f3ab8a5cbae3e5315cc5c2563;
 repository baseline 43927ae7c65e4e8578f9cfd63ffb4d62e60f1ad5. Runtime tests
@@ -10,7 +10,10 @@ configuration was modified.
 
 - Workshop artwork/metadata: trusted Steam CDN URL validation, HTTPS upgrades,
   bounded plain-text descriptions, size totals and missing-value handling.
-  Successful apply persists card metadata; restoring old Lua clears stale cards.
+  Collection input autosaves per customer/server without a Lua write, refreshes
+  Steam data on each status load, and survives Lua apply/backup restoration.
+  Changed metadata, invalid/empty drafts, actor/server separation, failed-refresh
+  cache retention and selection changes during an in-flight request are covered.
 - Workshop packaging: actual ZIP/GMA v3 bytes are read using native ZipArchive and
   an independent parser. Per-file CRCs, the GMA footer CRC, title, description,
   metadata, approved asset paths, normalized casing and 512 × 512 JPEG are checked.
@@ -19,9 +22,10 @@ configuration was modified.
   wrong actors/servers, permission changes, expiration and replaced previews are
   rejected. Replayed partial appends finish without duplicate bytes. Failed
   exports preserve HTTP publications, and public FastDL URLs cannot serve archives.
-- Eight Chromium checks run the actual customer components/native Tailwind with
+- Ten Chromium checks run the actual customer components/native Tailwind with
   synthetic transport/store/permission adapters: six gallery columns at 1600px,
-  two at 390px, loaded thumbnails, escaped metadata, applied gallery persistence,
+  two at 390px, loaded thumbnails, escaped metadata, autosaved input, fresh page-open/manual refreshes without Lua
+  application, applied gallery persistence,
   folder/preview flow, chosen name/description/image, PNG → 512px JPEG cover,
   authenticated package URL, mobile overflow, read-only controls and no server.cfg
   writes. Screenshots and results are retained in the disposable browser output.
@@ -42,16 +46,16 @@ configuration was modified.
 
 - Reproduced the reported missing settings/app:telemetry:uuid failure with 1.1.0
   and the original 2.0.1 probe in a networkless, read-only container with an empty
-  temporary SQLite database. Version 1.3.0 passes that unchanged probe: 2 handler
+  temporary SQLite database. Version 1.3.1 passes that unchanged probe: 2 handler
   classes, 2 extension routes, 1 page, 0 schedules; Laravel boot and PHP lint pass.
   tests/isolated-probe.py makes this regression repeatable.
 - The repository's generic probe now disables host telemetry only inside its
   synthetic process so legitimate scheduled addons can be inspected without
   production settings. The previous scheduled 1.1.0 candidate passes the fixed
-  probe (1 schedule). The delivered 1.3.0 addon does not require this manager patch.
+  probe (1 schedule). The delivered 1.3.1 addon does not require this manager patch.
 
 - SDK validation, PHP syntax, source/fragment hashes and SDK export round trip.
-- 41 Panel/Workshop/FastDL tests: nested/cyclic Workshop collections, safe Lua,
+- 43 Panel/Workshop/FastDL tests: nested/cyclic Workshop collections, safe Lua,
   hostile IDs/links, wrong-game/private items, real Panel owner/subuser policy,
   CSRF, two-factor, server membership/suspension, Lua updates via the actual
   Wings write contract, backup/restore, stale previews and enabled-version guards.
@@ -84,11 +88,11 @@ configuration was modified.
   install, same-ID update, disable, re-enable, delete, retained private data and
   source drift failure. Fixture build/verifier callbacks are test doubles, not
   production isolation attestations.
-  The actual published 1.2.0 archive was also installed and upgraded to 1.3.0
+  The staged 1.3.0 publication archive was also installed and upgraded to 1.3.1
   in all three variants, checking reconstruction of the changed route patches
-  and the additional independent page files.
+  and the new saved-selection route/file.
 - Stock native frontend: full TypeScript, targeted ESLint and production webpack
-  build were rerun for 1.3.0. Arix before/after type comparisons introduced zero errors; full Arix
+  build were rerun for 1.3.1. Prior 1.3.0 Arix before/after type comparisons introduced zero errors; full Arix
   compilation is not claimed because the root dependency set omits theme
   dependencies (92/100 existing baseline errors). The live host must retain its
   existing matched frozen theme dependencies.
@@ -98,7 +102,7 @@ configuration was modified.
   commit identity is checked. The repository currently reports private visibility
   and its unauthenticated package download returns 404; public download validation
   is deferred until the owner makes it public.
-  Publication: f669ac17cd6d7a98c91393988f108f7f61405e96.
+  Publication: f521144a43801e1dd072b113942f880873480950.
 
 ## Live checks still outside this environment
 

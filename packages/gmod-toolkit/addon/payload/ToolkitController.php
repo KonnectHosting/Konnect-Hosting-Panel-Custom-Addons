@@ -32,7 +32,14 @@ final class ToolkitController
     {
         $this->access->check($request, $server);
         return $this->reply(fn () => ['backups' => array_map(static fn ($entry) => ['id' => $entry['id'], 'created' => $entry['created']], $this->state->backups($server->uuid)),
-            'target' => WingsFiles::LUA, 'collection' => $this->state->read('workshop-collection-' . $server->uuid)['result'] ?? null]);
+            'target' => WingsFiles::LUA] + (new WorkshopView($this->state, $this->workshop))->status($server->uuid, $request->user()->id));
+    }
+
+    public function selection(Request $request, Server $server): mixed
+    {
+        $this->access->check($request, $server);
+        $data = $request->validate(['collection' => 'present|nullable|string|max:1024']);
+        return $this->reply(fn () => (new WorkshopView($this->state, $this->workshop))->save($server->uuid, $request->user()->id, $data['collection'] ?? ''));
     }
 
     public function fastdlStatus(Request $request, Server $server): mixed

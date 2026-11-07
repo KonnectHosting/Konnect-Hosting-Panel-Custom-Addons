@@ -239,7 +239,7 @@ test('enabled-version guard rejects stale routes after disable/update', function
     $path = $host->stateRoot . '/registry.json';
     if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
     $manifest = json_decode(file_get_contents(dirname(__DIR__) . '/addon/manifest.json'), true);
-    $record = ['version' => '1.3.0', 'manifest' => $manifest, 'enabled' => true];
+    $record = ['version' => '1.3.1', 'manifest' => $manifest, 'enabled' => true];
     file_put_contents($path, json_encode(['addons' => ['gmod.toolkit' => $record]]));
     same('ok', (new Enabled())->handle(Request::create('/test'), fn () => 'ok'));
     $record['enabled'] = false;

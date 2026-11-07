@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import http, { httpErrorToHuman } from '@/api/http';
 import { ServerContext } from '@/state/server';
 import ServerContentBlock from '@/components/elements/ServerContentBlock';
@@ -30,6 +30,8 @@ export function useToolkit<T>(page: 'workshop' | 'fastdl', poll = false) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const sequence = useRef(0);
+    const timeout = page === 'workshop' ? 60000 : 20000;
 
     useEffect(() => {
         let disposed = false;
@@ -40,11 +42,12 @@ export function useToolkit<T>(page: 'workshop' | 'fastdl', poll = false) {
         const load = async () => {
             if (loading) return;
             loading = true;
+            const request = ++sequence.current;
             try {
-                const { data } = await http.get<T>(endpoint);
-                if (!disposed) setStatus(data);
+                const { data } = await http.get<T>(endpoint, { timeout });
+                if (!disposed && request === sequence.current) setStatus(data);
             } catch (err) {
-                if (!disposed) setError(errorMessage(err));
+                if (!disposed && request === sequence.current) setError(errorMessage(err));
             } finally {
                 loading = false;
             }
@@ -53,14 +56,19 @@ export function useToolkit<T>(page: 'workshop' | 'fastdl', poll = false) {
         const timer = poll ? window.setInterval(load, 3000) : undefined;
         return () => {
             disposed = true;
+            ++sequence.current;
             if (timer !== undefined) window.clearInterval(timer);
         };
-    }, [endpoint, poll]);
+    }, [endpoint, poll, timeout]);
 
-    const refresh = useCallback(async () => {
-        const { data } = await http.get<T>(endpoint);
-        setStatus(data);
-    }, [endpoint]);
+    const refresh = useCallback(
+        async (accept = () => true) => {
+            const request = ++sequence.current;
+            const { data } = await http.get<T>(endpoint, { timeout });
+            if (request === sequence.current && accept()) setStatus(data);
+        },
+        [endpoint, timeout]
+    );
     const run = async (operation: () => Promise<void>) => {
         setBusy(true);
         setError('');

@@ -1,4 +1,4 @@
-# GMod Toolkit 1.3.0
+# GMod Toolkit 1.3.1
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
@@ -11,8 +11,15 @@ category, then save. The old `/gmod-toolkit` bookmark redirects to Workshop.
 Workshop shows a responsive collection grid with the actual Steam thumbnail,
 title, description, download size, subscriber count and update date for each
 addon. Metadata can be unavailable; the UI labels missing values and uses the
-bundled generated cover as a fallback. Applied collections retain their gallery
-on refresh. Steam artwork loads directly in the browser from trusted HTTPS CDN
+bundled generated cover as a fallback. Each customer's collection input is saved
+for that server automatically after a short pause or leaving the field. Opening
+the page fetches fresh Steam metadata; **Refresh collection** does the same
+manually. Steam failures keep the last gallery and show a retry message.
+Selection preferences are separate from the server's applied Lua and are private
+to each customer/server. Existing applied collections seed the initial selection
+on upgrade. Clearing the field clears the preference. Viewing, saving or refreshing
+a selection never creates a Lua preview or writes a game file. Use **Preview
+download Lua**, then Apply, to change the server file. Steam artwork loads directly in the browser from trusted HTTPS CDN
 hosts; no arbitrary image proxy is exposed.
 
 Workshop accepts Steam collection IDs/links, resolves nested GMod collections,

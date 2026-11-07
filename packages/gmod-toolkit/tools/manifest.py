@@ -37,6 +37,7 @@ specs = [
         Route::get('/workshop', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'workshopStatus']);
         Route::get('/fastdl', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'fastdlStatus']);
         Route::get('/workshop/cover', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'cover']);
+        Route::post('/workshop/selection', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'selection']);
         Route::post('/fastdl/addon', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'buildAddon']);
         Route::get('/fastdl/addon/{id}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');
         Route::post('/workshop/preview', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'preview']);
@@ -87,7 +88,7 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.3.0',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.3.1',
     'description': 'Workshop previews/backups and Panel-hosted FastDL using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,
