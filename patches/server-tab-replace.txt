@@ -1,0 +1,22 @@
+    server: [
+        {
+            path: '/fastdl',
+            permission: 'file.read-content',
+            name: 'FastDL',
+            component: lazy(() => import('@/components/server/gmodToolkit/FastdlContainer')),
+            exact: true,
+        },
+        {
+            path: '/workshop',
+            permission: 'file.read-content',
+            name: 'Workshop',
+            component: lazy(() => import('@/components/server/gmodToolkit/WorkshopContainer')),
+            exact: true,
+        },
+        {
+            path: '/gmod-toolkit',
+            permission: 'file.read-content',
+            name: undefined,
+            component: lazy(() => import('@/components/server/gmodToolkit/GmodToolkitContainer')),
+            exact: true,
+        },
