@@ -1,4 +1,4 @@
-# GMod Toolkit 1.5.0
+# GMod Toolkit 1.6.0
 
 One self-contained addon for Addon Manager 2.0.1, Panel 1.15.1 and PHP 8.2/8.3.
 Install the public package-folder URL in the manager's Install addon dialog.
@@ -8,58 +8,42 @@ Customers have separate **FastDL** (`/fastdl`), **Workshop** (`/workshop`) and
 new routes from the Editor's Missing Links list to your conditional Garry's Mod
 category, then save. The old `/gmod-toolkit` bookmark redirects to Workshop.
 
-Backdoor Scanner checks known code locations: `/garrysmod/lua`, `addons`,
-`gamemodes`, `data`, `cfg` and `materials`. It never recursively searches the
-container root, FastDL, backups or engine trees. Asset-only map/model/sound/
-particle/resource/screenshot trees in addons and gamemodes are pruned; relevant
-material files remain included. It reads .lua/.txt/.cfg/.vmt/.json/.dat/.js.
-Loose files are inspected as directories are discovered, so later limits do not
-discard all progress. Overall server disk usage is not a scan-size limit.
+Backdoor Scanner is **manual only**. It never intercepts, delays, restarts or
+starts the game server. Select folders or individual files, then request a scan.
+The default selects `/garrysmod/addons` only; clear it and enter a specific addon
+folder to check a small change. Other available code locations are
+`/garrysmod/lua`, `gamemodes`, `data`, `cfg` and `materials`. FastDL, backups,
+engine trees and asset-only map/model/sound folders are excluded. Optional packed
+mode inspects GMA/Workshop archives only inside selected locations; cache folders
+must be selected explicitly. Archive transfers can include large asset files.
 
-Packed addons are optional, off by default, and run after loose code. They include
-GMA and LZMA-alone Workshop archives from installed addon folders and the known
-`garrysmod/cache/srcds`, `garrysmod/cache/workshop`,
-`steamapps/workshop/content/4000` and `steam_cache` locations. Cache traversal is
-limited to archive layouts, not full game installations. Existing Wings streams
-the whole archive, including assets, so this option can be expensive. Excluded
-packed files are identified in the report, not silently approved.
+Cancel works while scanner work holds its lock. It writes a job-specific marker;
+active file reads/helper processes stop at checkpoints, retain partial results,
+and do not queue more work. The game process is unaffected. File managers can
+**Disable scanner** for the server; re-enabling leaves it idle. Existing file-read
+permissions control reports and manual scans; cancellation requires the requesting
+user or a server operator. Settings require file read/create/update permissions.
 
-Results include severity, path/member, line/context, rules and explanations.
-Private caches reuse unchanged analysis; new/modified files are checked on the
-next scan. Manual scans normally use size/mtime for reuse; the content-recheck
-option verifies bytes too. Cache and approval versions change with rules.
-Source contents never run as part of analysis. Potential copying/self-propagation
-patterns are reported, alongside HTTP/network execution, privilege changes and
-other documented indicators. This is a heuristic tool, not a runtime monitor or
-guarantee. Legitimate administration/DRM can match; findings require review.
+Private caches reuse unchanged file metadata/analysis on later manual scans.
+Choose **Recheck file contents** to download/hash selected code even when metadata
+is unchanged. Rules/scope changes invalidate cache entries. Old automatic jobs
+are retired on update, and old-rule findings are hidden until a customer requests
+a new scan. No automatic scan runs on page open or after updating.
 
-Panel start/restart requests automatically queue a selected-code check before
-Wings receives power. Start checks always hash selected contents, catching edits
-with preserved timestamps, while reusing analysis for unchanged bytes. New
-unapproved high/critical findings or blocking inspection errors hold the start.
-An operator with file read/create/update permissions can approve an exact file
-version after review, or correct/remove the suspect code, then request start
-again. Changed contents or rule updates require fresh review. Read-only users
-cannot approve files. Stop/kill and Cancel queued start cancel pending requests.
+Normal command registration is not a high-priority finding. Command/HTTP loader
+rules require input-to-execution evidence. A recognized first-statement admin
+guard on the actual callback sender reduces the priority of that input flow;
+unrelated or nested checks do not. Constant client effects and ordinary dynamic
+Lua remain optional review indicators. Only high/critical findings are shown by
+default; medium/low indicators can be shown explicitly. Findings require manual
+review and do not establish that an addon is malicious.
 
-Normal and Arix power buttons use the shared websocket bridge, which sends GMod
-power actions through the authenticated Panel API. Fresh GMod websocket tokens
-cannot issue power directly; non-GMod permissions/transport are retained.
-Reload the Panel after updating. Existing tokens may retain old rights for up to
-10 minutes. Direct node/API administrative starts, Wings boot/crash auto-restarts
-and live Lua loads on an already-running server are outside this guard. The scan
-is not an atomic filesystem lock or live prevention agent. No game-side code,
-node daemon or Proxmox edit is installed by the scanner.
-
-Limits apply to selected transfers, not server capacity: 512 MiB loose code plus
-a separate 4 GiB optional packed budget; 2 MiB/text file, 1 GiB/archive including
-expanded data, 50,000 candidates and 2 hours. Archives have bounded member/analysis
-limits. Quotas retain partial findings and explain uninspected inputs. Native
-binaries, bytecode, unsupported formats, symlinks and unreadable/changed files are
-reported. At most 500 priority findings and 200 coverage details are retained;
-truncation is shown. Private caches are bounded to 50,000 file slots per server.
-Zero findings does not prove a server is safe. Reports/cache data are private
-and survive page reloads. No file is automatically deleted or changed.
+Scans never execute, rewrite or delete source. Reports show file/member, line,
+context and explanations, including possible script copying. This is static
+analysis, not runtime monitoring or a guarantee. Limits retain partial results:
+512 MiB loose-code reads plus a separate 4 GiB packed budget; 2 MiB/text input,
+1 GiB/archive, 50,000 candidates and 2 hours. Overall server disk capacity is not
+a scan-size limit. Caches/reports are private and survive page reloads.
 
 Workshop shows a responsive collection grid with the actual Steam thumbnail,
 title, description, download size, subscriber count and update date for each

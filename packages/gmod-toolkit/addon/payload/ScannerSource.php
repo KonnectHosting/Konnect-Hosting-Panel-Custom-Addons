@@ -11,6 +11,10 @@ class ScannerSource
 {
     public function __construct(private DaemonFileRepository $files) {}
 
+    private ?\Closure $cancellation = null;
+    public function setCancellation(?\Closure $check): void { $this->cancellation = $check; }
+    private function checkpoint(): void { if ($this->cancellation) { ($this->cancellation)(); } }
+
     public static function path(string $path): bool
     {
         if ($path === '/') { return true; }
@@ -22,6 +26,7 @@ class ScannerSource
 
     private function rows(Server $server, string $path, float $deadline): array
     {
+        $this->checkpoint();
         $remaining = min(5.0, $deadline - microtime(true));
         if ($remaining < 0.1) { throw new RuntimeException('File inspection exceeded its time limit.'); }
         $response = $this->files->setServer($server)->getHttpClient()->get('/api/servers/' . $server->uuid . '/files/list-directory', [
@@ -29,6 +34,7 @@ class ScannerSource
         $body = $response->getBody(); $bytes = '';
         try {
             while (!$body->eof()) {
+                $this->checkpoint();
                 $bytes .= $body->read(65536);
                 if (strlen($bytes) > 8388608 || microtime(true) > $deadline) { throw new RuntimeException('Directory listing exceeded its size/time limit.'); }
             }
@@ -44,6 +50,7 @@ class ScannerSource
         if ($path === '/') { return true; }
         $current = '/';
         foreach (explode('/', ltrim($path, '/')) as $part) {
+            $this->checkpoint();
             $found = null;
             foreach ($this->rows($server, $current, $deadline) as $row) { if (($row['name'] ?? '') === $part) { $found = $row; break; } }
             if (!$found && $optional) { return false; }
@@ -55,8 +62,13 @@ class ScannerSource
 
     public function available(Server $server, string $root): bool
     {
-        if (!in_array($root, ScanScope::roots(true), true)) { throw new RuntimeException('Folder is outside the scanner locations.'); }
-        return $this->ancestors($server, $root, microtime(true) + 18, true);
+        if (!ScanScope::directory($root) && !ScanScope::file($root)) { throw new RuntimeException('Folder is outside the scanner locations.'); }
+        $deadline = microtime(true) + 18;
+        if (!$this->ancestors($server, dirname($root), $deadline, true)) { return false; }
+        foreach ($this->rows($server, dirname($root), $deadline) as $row) {
+            if (($row['name'] ?? '') === basename($root)) { return AssetPolicy::ordinary($row, true); }
+        }
+        return false;
     }
 
     public function listing(Server $server, string $path): array
@@ -90,6 +102,7 @@ class ScannerSource
         chmod($target, 0600); $body = $response->getBody(); $bytes = 0;
         try {
             while (!$body->eof()) {
+                $this->checkpoint();
                 $chunk = $body->read(65536); $bytes += strlen($chunk);
                 if ($bytes > $expected['bytes'] || microtime(true) > $deadline) { throw new RuntimeException('File transfer exceeded its declared size/time limit.'); }
                 if (fwrite($fd, $chunk) !== strlen($chunk)) { throw new RuntimeException('Private scan input could not be written.'); }

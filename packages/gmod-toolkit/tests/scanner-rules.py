@@ -38,12 +38,10 @@ class RuleTests(unittest.TestCase):
         found = rules('net.Receive("example", function(n, p)\n RunString(net.ReadString())\nend)')
         self.assertEqual('critical', found['network-execution']['severity'])
         self.assertEqual(2, found['network-execution']['line'])
-        self.assertIn('remote-handler-execution', found)
 
     def test_aliased_receiver_and_executor(self):
         found = rules('local receive = net.Receive\nlocal execute = RunString\nreceive("example", function() execute(net.ReadString()) end)')
         self.assertIn('network-execution', found)
-        self.assertIn('remote-handler-execution', found)
 
     def test_protected_call_execution_and_simple_value_flow(self):
         self.assertIn('network-execution', rules('pcall(RunString, net.ReadString())'))
@@ -137,6 +135,35 @@ class RuleTests(unittest.TestCase):
         findings, _, clipped = scan.analyze(('RunString(value)\n' * 50 + 'RunString(net.ReadString())').encode())
         self.assertTrue(clipped); self.assertEqual(30, len(findings))
         self.assertEqual('critical', findings[0]['severity'])
+
+
+    def test_normal_customer_commands_and_constant_client_effects_are_not_high(self):
+        for command in ['sw_dropship_cis', 'sw_dropship_republic', 'sw_cas_cis', 'sw_cas_republic']:
+            code = 'concommand.Add("%s", function(ply, cmd, args)\n if IsValid(ply) and not ply:IsSuperAdmin() then return end\n BroadcastLua("surface.PlaySound(\\"test.wav\\")")\n ply:SendLua("print(1)")\nend)' % command
+            findings, _, _ = scan.analyze(code.encode())
+            self.assertFalse([f for f in findings if f['severity'] in ('high', 'critical')], findings)
+            self.assertNotIn('remote-handler-execution', [f['rule'] for f in findings])
+
+    def test_untrusted_command_arguments_need_flow_and_sender_guard_is_local(self):
+        for sink in ['RunString(args[1])', 'ply:SendLua(args[1])', 'RunString(argString)']:
+            for guard in ['', 'if IsValid(ply) and not ply:IsSuperAdmin() then return end', 'if not ply:IsAdmin() then return end']:
+                code = 'concommand.Add("test",function(ply,cmd,args,argString) %s %s end)' % (guard, sink)
+                found, _, _ = scan.analyze(code.encode())
+                flagged = [f for f in found if f['rule'] == 'remote-handler-execution']
+                self.assertEqual(1, len(flagged), found)
+                self.assertEqual('medium' if guard else 'high', flagged[0]['severity'])
+        for fake in ['if not other:IsAdmin() then return end', 'if enabled then if not ply:IsAdmin() then return end end', 'print(1) if not ply:IsAdmin() then return end']:
+            found, _, _ = scan.analyze(('concommand.Add("test",function(ply,cmd,args) %s RunString(args[1]) end)' % fake).encode())
+            self.assertTrue(any(f['rule'] == 'remote-handler-execution' and f['severity'] == 'high' for f in found), found)
+
+    def test_constant_execution_and_unrelated_callback_data_do_not_prove_http_loader(self):
+        for code in [
+            'http.Fetch("https://example.test", function(body) BroadcastLua("print(1)") end)',
+            'http.Fetch("https://example.test", function(body) print(body) end, function(err) RunString("print(1)") end)',
+            'local payload=net.ReadString() concommand.Add("normal",function(ply,cmd,args) local payload="print(1)" RunString(payload) end)',
+        ]:
+            found, _, _ = scan.analyze(code.encode())
+            self.assertFalse([f for f in found if f['severity'] in ('critical','high')], found)
 
 
 class ArchiveTests(unittest.TestCase):

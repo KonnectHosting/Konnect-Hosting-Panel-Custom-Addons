@@ -28,28 +28,6 @@ for source in sorted((ADDON / 'payload').iterdir()):
     files.append({'source': 'payload/' + source.name, 'target': target, 'sha256': digest(source)})
 
 specs = [
-    ('websocket-guard', 'app/Http/Controllers/Api/Client/Servers/WebsocketController.php',
-     "        $permissions = $this->permissionsService->handle($server, $user);\n",
-     """
-        if (class_exists(\\Pterodactyl\\Addons\\GmodToolkit\\StartGuard::class)) {
-            $permissions = \\Pterodactyl\\Addons\\GmodToolkit\\StartGuard::websocketPermissions($server, $permissions);
-        }
-"""),
-    ('socket-power-import', 'resources/scripts/plugins/Websocket.ts',
-     "import { EventEmitter } from 'events';\n",
-     "import guardedPower from '@/components/server/gmodToolkit/PowerBridge';\n"),
-    ('socket-power-send', 'resources/scripts/plugins/Websocket.ts',
-     "    send(event: string, payload?: string | string[]) {\n",
-     "        if (guardedPower(this.token, event, payload, (name, message) => this.emit(name, message))) return;\n"),
-    ('power-precheck', 'app/Repositories/Wings/DaemonPowerRepository.php',
-     "        Assert::isInstanceOf($this->server, Server::class);\n",
-     """
-        // GMod Toolkit holds Panel-originated starts until selected code checks finish.
-        if (class_exists(\\Pterodactyl\\Addons\\GmodToolkit\\StartGuard::class)) {
-            $held = \\Pterodactyl\\Addons\\GmodToolkit\\StartGuard::intercept($this->server, $action);
-            if ($held !== null) { return $held; }
-        }
-"""),
     ('client-api', 'routes/api-client.php',
      "    Route::get('/resources', Client\\Servers\\ResourceUtilizationController::class)->name('api:client:server.resources');\n",
      """
@@ -62,8 +40,7 @@ specs = [
         Route::get('/scanner', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'status']);
         Route::post('/scanner/start', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'start']);
         Route::post('/scanner/cancel', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'cancel']);
-        Route::post('/scanner/approve', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'approve']);
-        Route::post('/scanner/cancel-start', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'cancelStart']);
+        Route::post('/scanner/settings', [\\Pterodactyl\\Addons\\GmodToolkit\\ScannerController::class, 'settings']);
         Route::post('/workshop/selection', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'selection']);
         Route::post('/fastdl/addon', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'buildAddon']);
         Route::get('/fastdl/addon/{id}', [\\Pterodactyl\\Addons\\GmodToolkit\\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');
@@ -122,7 +99,7 @@ for name, target, find, addition in specs:
                     'replace': 'patches/' + after.name, 'beforeSha256': digest(before), 'afterSha256': digest(after)})
 
 manifest = {
-    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.5.0',
+    'manifestVersion': 1, 'id': 'gmod.toolkit', 'name': 'GMod Toolkit', 'version': '1.6.0',
     'description': 'Workshop, Panel-hosted FastDL and private static backdoor scans using existing Wings and queue services.',
     'compatibility': {'manager': '=2.0.1', 'php': '>=8.2 <9.0', 'panel': '=1.15.1'},
     'dependencies': [], 'incompatible': [], 'files': files, 'patches': patches,
@@ -133,8 +110,7 @@ manifest = {
             {'id': 'settings-save', 'path': 'settings/save', 'method': 'POST', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\AdminController@save', 'permission': 'admin'},
         ],
         'jobs': [{'id': 'fastdl-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\Fastdl@handle', 'permission': 'system'},
-                 {'id': 'scanner-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\BackdoorScanner@handle', 'permission': 'system'},
-                 {'id': 'power-check', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\StartGuard@handle', 'permission': 'system'}],
+                 {'id': 'scanner-step', 'handler': 'Pterodactyl\\Addons\\GmodToolkit\\BackdoorScanner@handle', 'permission': 'system'}],
     },
     'database': {'dataPolicy': 'preserve', 'migrations': []},
     'build': {'mode': 'panel', 'profile': 'panel-v1', 'outputs': ['public/assets']},

@@ -1,4 +1,4 @@
-# GMod Toolkit 1.5.0
+# GMod Toolkit 1.6.0
 
 A single Panel addon: install through the existing Addon Manager dialog, then
 use the separate FastDL, Workshop and Backdoor Scanner server pages. It needs **no node changes or companion
@@ -7,13 +7,11 @@ frontend build and existing Wings/queue integrations do the work.
 
 ## Install through the Panel
 
-Version 1.5.0 is staged in the private repository. Once the owner makes it public,
-paste this pinned URL into **Addon Manager → Install addon → GitHub package URL**,
-or use the installed GMod Toolkit entry's **Update** action. The public URL
-installer returns 404 while the repository is private:
+For version 1.6.0, paste this pinned URL into **Addon Manager → Install addon → GitHub package URL**,
+or use the installed GMod Toolkit entry's **Update** action. Use the pinned addon-only package:
 
 ```text
-https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/ad93274d69eeecb63591af233496212dc0185857
+https://github.com/KonnectHosting/Konnect-Hosting-Panel-Custom-Addons/tree/0b486601ea42fb7ab027b0e5f99f4ceb7bf8f952
 ```
 
 This immutable publication contains only the deployable addon at its root.
@@ -21,7 +19,7 @@ The development source remains in packages/gmod-toolkit/addon on the PR branch.
 Wait for the manager to finish activation. No files need copying into /root,
 no SSH commands need running, and no node provisioning step follows install.
 
-The optional downloadable SDK archive is `dist/gmod-toolkit-1.5.0.zip` with its
+The optional downloadable SDK archive is `dist/gmod-toolkit-1.6.0.zip` with its
 `.sha256` sidecar. It contains manifest.json at its root. The manager dialog uses
 the **package URL above**, rather than a GitHub blob/raw ZIP URL. Updates
 use **GMod Toolkit → Update**, the same addon ID `gmod.toolkit` and this version's immutable package URL.
@@ -31,25 +29,49 @@ On Arix, remove the old GMod Toolkit sidebar entry. From **Missing Links**, add
 **FastDL** (`/fastdl`), **Workshop** (`/workshop`) and **Backdoor Scanner**
 (`/backdoor-scanner`) to your conditional Garry's Mod category and save. The old `/gmod-toolkit` URL redirects to Workshop.
 
-Version 1.5.0 targets the known GMod code locations instead of recursively
-searching the container. Loose files are inspected incrementally, with private
-cached results for unchanged code. Maps/models/FastDL/backups/engine trees are
-excluded; packed addons and known Workshop caches are a separate opt-in scan.
-Large overall server capacity does not trigger a scan-size failure.
+Version 1.6.0 removes the automatic pre-start scanner and restores native Panel
+power requests, websocket permissions and socket transport. Updating from 1.5.0
+removes the old guard files/job; refresh the browser after activation. Existing
+Workshop and FastDL features are retained. No node or game-side change is needed.
 
-Panel-originated starts/restarts queue a selected-code check before sending
-power to Wings. Normal/Arix websocket buttons also use this path with fresh
-tokens. New high-priority findings or incomplete selected-code checks hold the
-start for review; permitted operators can approve exact file versions. Stop/kill
-or Cancel queued start cancels pending work. Start checks hash selected contents
-so preserved timestamps do not hide edits, while unchanged analysis is reused.
-Reload the Panel after updating; old websocket tokens retain their original
-rights until their existing expiry (up to 10 minutes).
+Backdoor Scanner is **manual only**. It never intercepts, delays, restarts or
+starts the game server. Select folders or individual files, then request a scan.
+The default selects `/garrysmod/addons` only; clear it and enter a specific addon
+folder to check a small change. Other available code locations are
+`/garrysmod/lua`, `gamemodes`, `data`, `cfg` and `materials`. FastDL, backups,
+engine trees and asset-only map/model/sound folders are excluded. Optional packed
+mode inspects GMA/Workshop archives only inside selected locations; cache folders
+must be selected explicitly. Archive transfers can include large asset files.
 
-No host/node/game-container service is installed. Existing Workshop and FastDL
-features are retained. This does not monitor a running GMod process or direct
-node/auto-restart actions. See [SCAN-RULES.md](SCAN-RULES.md) for precise coverage,
-cache behavior, approvals and guard boundaries.
+Cancel works while scanner work holds its lock. It writes a job-specific marker;
+active file reads/helper processes stop at checkpoints, retain partial results,
+and do not queue more work. The game process is unaffected. File managers can
+**Disable scanner** for the server; re-enabling leaves it idle. Existing file-read
+permissions control reports and manual scans; cancellation requires the requesting
+user or a server operator. Settings require file read/create/update permissions.
+
+Private caches reuse unchanged file metadata/analysis on later manual scans.
+Choose **Recheck file contents** to download/hash selected code even when metadata
+is unchanged. Rules/scope changes invalidate cache entries. Old automatic jobs
+are retired on update, and old-rule findings are hidden until a customer requests
+a new scan. No automatic scan runs on page open or after updating.
+
+Normal command registration is not a high-priority finding. Command/HTTP loader
+rules require input-to-execution evidence. A recognized first-statement admin
+guard on the actual callback sender reduces the priority of that input flow;
+unrelated or nested checks do not. Constant client effects and ordinary dynamic
+Lua remain optional review indicators. Only high/critical findings are shown by
+default; medium/low indicators can be shown explicitly. Findings require manual
+review and do not establish that an addon is malicious.
+
+Scans never execute, rewrite or delete source. Reports show file/member, line,
+context and explanations, including possible script copying. This is static
+analysis, not runtime monitoring or a guarantee. Limits retain partial results:
+512 MiB loose-code reads plus a separate 4 GiB packed budget; 2 MiB/text input,
+1 GiB/archive, 50,000 candidates and 2 hours. Overall server disk capacity is not
+a scan-size limit. Caches/reports are private and survive page reloads.
+
+See [SCAN-RULES.md](SCAN-RULES.md) for scope, detection evidence and limits.
 
 ## Customer tools
 
@@ -125,7 +147,7 @@ private snapshot is the object the customer previews and approves.
 
 ## Isolated validation compatibility
 
-Version 1.5.0 has no registered scheduler hook. Authorized status polling resumes
+Version 1.6.0 has no registered scheduler hook. Authorized status polling resumes
 only that server's interrupted work, with throttling and fresh worker permission
 checks. This avoids an installed 2.0.1 probe bug: resolving the host scheduler
 starts telemetry registration, which queries a settings table absent from the
@@ -181,8 +203,8 @@ absent output filename:
 ```sh
 python3 packages/gmod-toolkit/tools/manifest.py
 php addon-manager/sdk/bin/addon.php export packages/gmod-toolkit/addon \
-  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.5.0.zip
-(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.5.0.zip.sha256)
+  --output=packages/gmod-toolkit/dist/gmod-toolkit-1.6.0.zip
+(cd packages/gmod-toolkit/dist && sha256sum -c gmod-toolkit-1.6.0.zip.sha256)
 ```
 
 The original deployed probe is covered by an executable regression (a full Git

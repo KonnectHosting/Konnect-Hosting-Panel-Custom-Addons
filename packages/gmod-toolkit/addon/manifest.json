@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "gmod.toolkit",
   "name": "GMod Toolkit",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Workshop, Panel-hosted FastDL and private static backdoor scans using existing Wings and queue services.",
   "compatibility": {
     "manager": "=2.0.1",
@@ -45,7 +45,7 @@
     {
       "source": "payload/BackdoorScanner.php",
       "target": "app/Addons/GmodToolkit/BackdoorScanner.php",
-      "sha256": "bb684108a42179660575964208cfc1f723cb16ae806376791d09dd2409548fca"
+      "sha256": "b434d1668dc17d1e792b04b859109c75be955579555c18d43cf707cb25158c93"
     },
     {
       "source": "payload/DownloadController.php",
@@ -55,12 +55,12 @@
     {
       "source": "payload/Enabled.php",
       "target": "app/Addons/GmodToolkit/Enabled.php",
-      "sha256": "6759fec34bbe954da8c6f95bd88c2012c676e7a0f19002666fd8b209483fdc53"
+      "sha256": "476bd9c7fc6f702c86491672a8d5a0d88ba861aed25e47f0822392bb999f6d70"
     },
     {
       "source": "payload/Fastdl.php",
       "target": "app/Addons/GmodToolkit/Fastdl.php",
-      "sha256": "634794e7a18b3f672c118ccd455ff0d7f5ba7d52cdd4b7f86b2c2315b2a97f38"
+      "sha256": "fe014a2161bbf3a476833e287e99293835735c5baae2bb872aaa03ff9849ee96"
     },
     {
       "source": "payload/FastdlContainer.tsx",
@@ -73,34 +73,24 @@
       "sha256": "5a5b245c6fd7c4ba818fbb303913df91987f8431a7132e1655b51a096eff8e97"
     },
     {
-      "source": "payload/PowerBridge.tsx",
-      "target": "resources/scripts/components/server/gmodToolkit/PowerBridge.tsx",
-      "sha256": "2df2fefcca9c51678b8f0d591586d66750a329b2f6cfcad66c3a4ed9cffb0cd0"
-    },
-    {
       "source": "payload/ScanScope.php",
       "target": "app/Addons/GmodToolkit/ScanScope.php",
-      "sha256": "27348086a52b4a8b3dbd7cc2c19512bdfa5fdd698a0eb83777b50a159d3cbeeb"
+      "sha256": "95ef54d588386f02a4390f89baf6514a27db9542afe677892c01e329c6c34e1e"
     },
     {
       "source": "payload/ScannerContainer.tsx",
       "target": "resources/scripts/components/server/gmodToolkit/ScannerContainer.tsx",
-      "sha256": "3cb70b903520d2432c1b08c6ddec08807ebf730d4faba29a2511f7e4a7310a79"
+      "sha256": "37e75651e0f1843bee7c054ba1600cede70f9f76ba9c28f3ead0fede9cff17f4"
     },
     {
       "source": "payload/ScannerController.php",
       "target": "app/Addons/GmodToolkit/ScannerController.php",
-      "sha256": "bea1403cc4b6ebfc802f39a404ff6ce8a607a39dcf23d054063a59a01c741aca"
+      "sha256": "705d78cfb02555bf03291e58f6bfe2086bb8cb7e3e09754f1fc6ff93da08a77b"
     },
     {
       "source": "payload/ScannerSource.php",
       "target": "app/Addons/GmodToolkit/ScannerSource.php",
-      "sha256": "bc7c0871b402673189aad89c01c9cd3db93762d527520de3288ecc677cd3b93e"
-    },
-    {
-      "source": "payload/StartGuard.php",
-      "target": "app/Addons/GmodToolkit/StartGuard.php",
-      "sha256": "397bac1929a816c4983c92e519696fc22829201a4e15c977f016cfbce81e2880"
+      "sha256": "92331b49abf5c62c48a2fd5bfd987ae0d54257abb6e2998c5147272f18f7ddce"
     },
     {
       "source": "payload/State.php",
@@ -160,7 +150,7 @@
     {
       "source": "payload/scan.py",
       "target": "app/Addons/GmodToolkit/scan.py",
-      "sha256": "ab67609fbe547e1818901e1375f8dd8b8950387d18ea456cf63f66c065277b23"
+      "sha256": "ea0faa3182ae7d3206710d3d1e99dc8482c71610730d419f6588209a6d9d6c9c"
     },
     {
       "source": "payload/settings.blade.php",
@@ -170,49 +160,13 @@
   ],
   "patches": [
     {
-      "id": "websocket-guard",
-      "target": "app/Http/Controllers/Api/Client/Servers/WebsocketController.php",
-      "owner": "baseline",
-      "find": "patches/websocket-guard-find.txt",
-      "replace": "patches/websocket-guard-replace.txt",
-      "beforeSha256": "d807b2b1aac7d917029c57bcdb339068b93cdf785067ca658d40b6299c5cb884",
-      "afterSha256": "d0f53ac6ae6cc3ecd1ebbe4f7791f3c116837ff85243b432cebb62c54ca03066"
-    },
-    {
-      "id": "socket-power-import",
-      "target": "resources/scripts/plugins/Websocket.ts",
-      "owner": "baseline",
-      "find": "patches/socket-power-import-find.txt",
-      "replace": "patches/socket-power-import-replace.txt",
-      "beforeSha256": "92e7a680956f5f67c21b0e016f298b727868e443c9df8c55b27e9ef3aec539c2",
-      "afterSha256": "1d8bb856e824fe322c8d431a220e6a8abc839be5d82b2287888d4a827817d357"
-    },
-    {
-      "id": "socket-power-send",
-      "target": "resources/scripts/plugins/Websocket.ts",
-      "owner": "baseline",
-      "find": "patches/socket-power-send-find.txt",
-      "replace": "patches/socket-power-send-replace.txt",
-      "beforeSha256": "84e7a618f845117d3c7a5285ca4ad295feae9d835075567cfb257b8b9562318c",
-      "afterSha256": "25ac4becda25fd9035c7b02608f476b9eefa08c1b93fb798b9867f66229e5be7"
-    },
-    {
-      "id": "power-precheck",
-      "target": "app/Repositories/Wings/DaemonPowerRepository.php",
-      "owner": "baseline",
-      "find": "patches/power-precheck-find.txt",
-      "replace": "patches/power-precheck-replace.txt",
-      "beforeSha256": "84ab1fe74eb60555026a64e1e94652c89a134760b8f8170fe284acf7c0e3930f",
-      "afterSha256": "95b9ba263f39bbabb1093ee1e74606e13568676aa05ffae330215abb0a16b2c3"
-    },
-    {
       "id": "client-api",
       "target": "routes/api-client.php",
       "owner": "baseline",
       "find": "patches/client-api-find.txt",
       "replace": "patches/client-api-replace.txt",
       "beforeSha256": "238a0dad5ba3f468c66ad7841d40e6dba94f0f0c41804eed29f4d33bbc3c93bf",
-      "afterSha256": "99c3c893c9e41d405c2ec1366976166fded6ac733336f4b304d270b7fddeb502"
+      "afterSha256": "5a407c12f7eb59948a56863886ec88bed8e76db87f5f0415273c18d1acd83e74"
     },
     {
       "id": "server-tab",
@@ -268,11 +222,6 @@
       {
         "id": "scanner-step",
         "handler": "Pterodactyl\\Addons\\GmodToolkit\\BackdoorScanner@handle",
-        "permission": "system"
-      },
-      {
-        "id": "power-check",
-        "handler": "Pterodactyl\\Addons\\GmodToolkit\\StartGuard@handle",
         "permission": "system"
       }
     ]

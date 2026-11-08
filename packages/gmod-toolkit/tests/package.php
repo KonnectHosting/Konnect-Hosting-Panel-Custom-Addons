@@ -18,7 +18,8 @@ same([], $manifest['extensions']['schedules'] ?? [], 'This addon must install wi
 foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'] as $variant => $prefix) {
     temporary(function (string $root) use ($repo, $package, $manifest, $variant, $prefix, $previousArchive): void {
         $panel = $root . '/panel';
-        foreach ($manifest['patches'] as $patch) {
+        $powerTargets = ['app/Repositories/Wings/DaemonPowerRepository.php', 'app/Http/Controllers/Api/Client/Servers/WebsocketController.php', 'resources/scripts/plugins/Websocket.ts'];
+        foreach (array_merge($manifest['patches'], array_map(static fn ($target) => ['target' => $target], $powerTargets)) as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];
             if (!is_file($source)) { $source = $repo . '/arix/v2.1.3/' . $patch['target']; }
             if (!is_file($source)) { $source = $repo . '/' . $patch['target']; }
@@ -46,17 +47,25 @@ foreach (['stock' => '', 'arix' => 'arix/v2.1.3', 'arix-pack' => 'addons/v2.0.2'
             $bytes = file_get_contents($panel . '/' . $patch['target']);
             same(1, substr_count($bytes, file_get_contents($package . '/' . $patch['replace'])));
         }
+        foreach ($powerTargets as $target) {
+            $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $target;
+            if (!is_file($source)) { $source = $repo . '/arix/v2.1.3/' . $target; }
+            if (!is_file($source)) { $source = $repo . '/' . $target; }
+            same(file_get_contents($source), file_get_contents($panel . '/' . $target), 'Native power source was not restored.');
+        }
+        foreach (['app/Addons/GmodToolkit/StartGuard.php', 'resources/scripts/components/server/gmodToolkit/PowerBridge.tsx'] as $target) { check(!file_exists($panel . '/' . $target), 'Obsolete power guard survived update.'); }
+        check(!in_array('power-check', array_column($manifest['extensions']['jobs'], 'id'), true), 'Power job registration survived.');
         foreach ($manifest['files'] as $file) { check(is_file($panel . '/' . $file['target']), 'Payload missing after installation.'); }
         $update = $root . '/update';
         Files::copyInventory($package, $update, Files::inventory($package));
-        $next = $manifest; $next['version'] = '1.5.1';
-        $enabled = str_replace("'1.5.0'", "'1.5.1'", file_get_contents($update . '/payload/Enabled.php'));
+        $next = $manifest; $next['version'] = '1.6.1';
+        $enabled = str_replace("'1.6.0'", "'1.6.1'", file_get_contents($update . '/payload/Enabled.php'));
         write($update . '/payload/Enabled.php', $enabled);
         foreach ($next['files'] as &$file) { if ($file['source'] === 'payload/Enabled.php') { $file['sha256'] = hash('sha256', $enabled); } }
         unset($file);
         write($update . '/manifest.json', json_encode($next));
         operation($fixture, 'update', ['addonId' => 'gmod.toolkit', 'packageRoot' => $update]);
-        same('1.5.1', $manager->registry()['addons']['gmod.toolkit']['version']);
+        same('1.6.1', $manager->registry()['addons']['gmod.toolkit']['version']);
         operation($fixture, 'disable', ['addonId' => 'gmod.toolkit']);
         foreach ($manifest['patches'] as $patch) {
             $source = $repo . '/' . ($prefix ? $prefix . '/' : '') . $patch['target'];

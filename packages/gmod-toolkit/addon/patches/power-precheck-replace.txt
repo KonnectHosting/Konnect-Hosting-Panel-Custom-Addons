@@ -1,7 +1,0 @@
-        Assert::isInstanceOf($this->server, Server::class);
-
-        // GMod Toolkit holds Panel-originated starts until selected code checks finish.
-        if (class_exists(\Pterodactyl\Addons\GmodToolkit\StartGuard::class)) {
-            $held = \Pterodactyl\Addons\GmodToolkit\StartGuard::intercept($this->server, $action);
-            if ($held !== null) { return $held; }
-        }

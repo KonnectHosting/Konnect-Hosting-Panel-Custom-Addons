@@ -1,6 +1,6 @@
 # Backdoor Scanner: rules, research and limits
 
-Rules version: **2026.11.07.2**. Reviewed 2026-11-07. This implementation and its
+Rules version: **2026.11.07.3**. Reviewed 2026-11-07. This implementation and its
 synthetic regression corpus were written for GMod Toolkit; no third-party scanner
 or malware payload is executed or installed. The scanner needs no Steam key,
 node service, Proxmox change or game-side Lua installation.
@@ -41,20 +41,25 @@ node service, Proxmox change or game-side Lua installation.
 
 | Rule/family | Priority | Evidence and interpretation |
 | --- | --- | --- |
-| `network-execution` | Critical for direct nesting; high for simple assignment association | Network-read input reaches a Lua executor, including aliases and protected calls. An exposed server receiver may permit remote control. |
-| `remote-handler-execution`, `http-execution` | High | A command/network or web callback contains execution APIs, or the executor is the HTTP callback. Callback co-occurrence is heuristic; authorization and exact flow still need review. |
+| `network-execution` | Critical for direct nesting; high for simple assignment association; medium for a recognized sender guard | Network-read input reaches a Lua executor, including aliases and protected calls. An exposed server receiver may permit remote control. |
+| `remote-handler-execution`, `http-execution` | High, or medium for a recognized sender guard | Command arguments/HTTP response parameters reach an executor, or the executor itself is the response callback. Registration, constant client effects and callback co-occurrence alone do not trigger this rule. |
 | `identity-privilege`, `identity-bypass` | High | Fixed Steam identity near a privilege grant or allow decision. Intentional whitelists can match. |
-| `remote-privilege`, `authorization-override` | High | Remote callbacks alter administration, or admin/permission functions are replaced. Merely seeing an admin check does not prove it protects the actual sender. |
+| `remote-privilege`, `authorization-override` | High/medium | Remote callbacks alter administration; a recognized sender guard reduces priority. Defining/replacing an authorization function alone is an optional medium indicator. |
 | `privilege-change`, `privilege-table-write`, `admin-command` | Medium/high | Administration APIs, direct rank-table writes and admin console commands. These legitimately occur in administration frameworks. |
-| `indirect-execution`, `encoded-loader`, `encoded-payload` | High | Indexed/encoded executor, decoding alongside execution, or bounded literal Base64 containing sensitive APIs. Literal inspection never evaluates Lua. |
+| `indirect-execution`, `encoded-loader`, `encoded-payload` | High | Indexed/encoded executor, decoding directly into execution, or bounded literal Base64 containing sensitive APIs. Encoding merely alongside execution is medium. Literal inspection never evaluates Lua. |
 | `code-propagation` | High | Script reads feed file writes, or source introspection appears with copying. Review destinations/loops; installers and backups can match. This is not runtime monitoring. |
 | `file-execution`, `persistent-write` | High/medium | Files feed execution or code changes script/privilege paths. Review file provenance and who can write it. |
 | `possible-exfiltration`, `console-execution`, `native-execution` | High | Potential credentials/configuration in HTTP arguments, sensitive/network-derived console commands, or native/OS interfaces. Legitimate integrations can match. |
 | `historical-channel` | High receiver / medium registration | Exact small historical name set; names can be reused by legitimate/protection addons. References in comments or unused string lists are not flagged. |
-| `dynamic-lua`, `native-module`, `hidden-unicode` | Medium | Dynamic compilation, additional modules or invisible/directional characters. Review context rather than treating them as malware signatures. |
+| `dynamic-lua`, `native-module`, `hidden-unicode` | Medium, hidden by default | Dynamic compilation, additional modules or invisible/directional characters. Review context rather than treating them as malware signatures. |
 | `environment-access`, `http-request` | Low, hidden by default | Common globals/debug access and ordinary HTTP requests. These alone are weak indicators. |
 
 The lexical pass understands GLua/Lua comments, quoted strings and long brackets.
+All medium/low indicators are hidden by default. A recognized sender guard must
+be the first callback statement, check that callback's sender and terminate with
+`return` for non-admins. Constant SendLua/BroadcastLua calls alone never establish
+remote input flow. The detector does not whitelist addon or command names.
+
 Only bounded literal concatenation, escaped bytes, `string.char` and
 `string.reverse` are folded. Simple API aliases and direct assignments are
 tracked. This is **not** a complete Lua AST, scope analyzer, symbolic executor,
@@ -64,7 +69,8 @@ is review priority, not a claim of confirmed malware or measured probability.
 
 ## Targeted scope and resource limits
 
-The default scans only loose code below:
+Only locations selected by the customer are scanned. The default selection is
+`/garrysmod/addons` only. Available code roots (or individual descendants) are:
 
 - `/garrysmod/lua`
 - `/garrysmod/addons`
@@ -81,8 +87,8 @@ folders with those names are retained. Material VMT files remain in scope.
 arbitrary custom root folders are not visited. A 60–100 GB server is not rejected
 because of its overall size; only selected file transfers consume scan budgets.
 
-**Optional packed mode**, off by default, also reads GMA files in those folders
-and the known caches `/garrysmod/cache/srcds`, `/garrysmod/cache/workshop`,
+**Optional packed mode**, off by default, reads GMA files in selected folders.
+Customers can separately select the known caches `/garrysmod/cache/srcds`, `/garrysmod/cache/workshop`,
 `/steamapps/workshop/content/4000` and `/steam_cache`. Only known Workshop/numeric
 item layouts within `steam_cache` are traversed; cached full-game installations
 are excluded. Cache roots are archive-only. Packed addons found in a default
@@ -105,11 +111,10 @@ folders are discovered; there is no collect-everything-first failure.
   directories, path/depth bounds and 2 hours. Preserve at least 1 GiB Panel free
   space. Quotas retain partial results and explain what was not inspected.
 - Retain the highest-priority findings: 30 per helper invocation, 500 per report,
-  and 200 coverage details. Unapproved findings take precedence over approved
-  file versions. Report truncation never clears the pre-start count of new
-  high/critical findings. Static detection has false positives and false negatives.
+  and 200 coverage details. Higher-priority findings replace weaker findings
+  when the report is full. Static detection has false positives and false negatives.
 
-## Incremental results and approvals
+## Incremental manual scans
 
 Private per-server, per-path caches store source SHA-256, metadata, the rules/
 scope version and static analysis output. Normal manual scans reuse records
@@ -120,53 +125,28 @@ SFTP or another process can preserve timestamps. Cache slots are bounded to
 50,000 per server; uncached files are still inspected. Deleted files disappear
 from the next report. Rules/scope changes invalidate cached analysis.
 
-Explicit approvals require existing file-read/create/update permissions and a
-completed report containing that exact file/SHA-256. They apply to the whole file
-(or whole GMA), not just one shown line. Content changes or detection-rule updates
-invalidate the approval. Read-only users cannot approve code or cancel another
-user's preflight scan. Approvals are private and record actor/time; no game file
-is rewritten. Starting a new scan replaces the latest report, not the cache.
+Starting a new manual scan replaces the latest report, not the cache. Selection
+preferences are remembered in the browser for that server. API requests must
+supply a nonempty selection of up to 50 valid files/folders; overlapping folders
+are collapsed. Selecting a cache does not select other caches.
 
-## Checks before Panel power actions
+## Cancellation, disable and power controls
 
-The shared Panel Wings power repository intercepts GMod start/restart requests,
-including normal client/API, administrator and scheduled operations using that
-repository. The request queues a guarded check; it never forwards power first.
-The requesting actor's current power permission, server eligibility/state, nonce,
-cancellation marker and expiry are checked again before sending the action.
+The scanner has no power hooks, start checks, approval gate, websocket permission
+changes or automatic schedule. Startup, restart, stop and kill use native Panel
+behavior regardless of scanner state. The 1.5.0 guard is removed during update;
+old automatic jobs are retired rather than recovered. Reports generated with old
+rules are marked outdated and their findings hidden, with no automatic rescan.
 
-Power checks always re-read/hash selected content, even when timestamps are
-unchanged; unchanged **analysis** is reused. Thus CPU-intensive detection is run
-for new/changed contents rather than exhaustively repeated for every file.
-The last manually selected packed-mode setting applies. Packed mode is still
-optional and expensive; its exclusions are not a guarantee about unscanned code.
+Cancellation uses an atomic job-ID marker outside the worker lock and can be
+requested while Wings streams a file or the Python helper runs. Checkpoints stop
+work and only the scanner's own helper can be terminated. Pending cancellation
+prevents another scan until the old worker releases its input; partial results
+remain available. Disabling the server's manual scanner requests cancellation;
+enabling it never starts work. Permissions are checked again in queued work.
 
-A completed selected-scope check with no unapproved high/critical findings and no
-blocking inspection errors sends the requested action once. Findings needing
-review, unreadable selected code, lost permissions, queue failures, cancellation,
-replacement or expiry hold it. Review/correct the file, or explicitly approve its
-exact version, then request start/restart again. Intentional out-of-scope formats
-are listed separately; they are not treated as successful malware inspection.
-Stop/kill cancels a queued start. An explicit Cancel queued start button also
-works while the game is offline and its normal Stop button is disabled.
-
-Normal Panel power buttons use the Wings websocket. For eligible GMod servers,
-fresh websocket tokens carry a marker and omit direct power permissions; owner
-`*` permissions are expanded to equivalent known non-power permissions, while
-existing admin flags are retained and subuser privileges are never expanded.
-The shared socket client (also used by Arix) forwards those power actions through
-the normal authenticated Panel API. Console/log/stat traffic is unchanged.
-Other eggs retain their original permissions and transport. Disabling/deleting
-the addon restores the exact native source fragments.
-
-Reload the Panel after updating. Existing tokens issued before the update may
-retain their old rights until their existing 10-minute expiry. Direct node/API
-administrative starts, Wings crash/boot auto-restarts and code loaded while GMod
-is already running are outside this Panel-only guard. A scan is a point-in-time
-review, not an atomic filesystem lock, runtime sandbox or live malware monitor.
-Concurrent file changes and sophisticated dynamic/cross-file behavior can evade
-it. The propagation rule identifies suspicious copying patterns; it does not
-observe or prove a running infection spreading.
+The scanner is a point-in-time static review. It does not observe a running
+infection, stop game-side execution or prove that suspicious copying will occur.
 
 Rules ship with addon releases. There is no downloaded executable threat feed,
 payload fetching, account reputation lookup or automatic name whitelist. Tests

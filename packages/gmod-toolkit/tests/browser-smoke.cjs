@@ -50,8 +50,8 @@ const state = {
     export: null,
     scanner: '',
     scanArchives: false,
-    powerCheck: null,
-    approved: false,
+    enabled: true,
+    scanLocations: [],
     scanPolls: 0,
     requests: [],
 };
@@ -82,28 +82,15 @@ const server = http.createServer(async (request, response) => {
         response.setHeader('Content-Type', 'application/json');
         response.end(JSON.stringify(data));
     };
-    if (url.pathname.endsWith('/power')) {
-        state.powerCheck = {
-            status: 'pending',
-            signal: body.signal,
-            message: 'Checking new and changed code before start.',
-        };
-        send({ message: 'Queued selected-code check.' });
-        return;
-    }
-    if (url.pathname.endsWith('/scanner/cancel-start')) {
-        state.powerCheck = { status: 'cancelled', signal: 'start', message: 'Queued start/restart cancelled.' };
-        send({ message: 'Queued start/restart cancelled.' });
-        return;
-    }
-    if (url.pathname.endsWith('/scanner/approve')) {
-        state.approved = body.file;
-        send({ message: 'This exact file version is approved for start checks.' });
+    if (url.pathname.endsWith('/scanner/settings')) {
+        state.enabled = body.enabled;
+        if (!state.enabled && state.scanner === 'running') state.scanner = 'cancelled';
+        send({ message: state.enabled ? 'Manual scanner enabled.' : 'Scanner disabled.' });
         return;
     }
     if (url.pathname.endsWith('/scanner/start')) {
         state.scanArchives = !!body.archives;
-        state.approved = false;
+        state.scanLocations = body.locations;
         state.scanner = 'running';
         state.scanPolls = 0;
         send({ status: 'running' });
@@ -159,7 +146,7 @@ const server = http.createServer(async (request, response) => {
             },
         ];
         send({
-            powerCheck: state.powerCheck,
+            enabled: state.enabled,
             locations: [
                 '/garrysmod/lua',
                 '/garrysmod/addons',
@@ -174,11 +161,13 @@ const server = http.createServer(async (request, response) => {
                 '/steamapps/workshop/content/4000',
                 '/steam_cache',
             ],
-            rulesVersion: '2026.11.07.2',
+            rulesVersion: '2026.11.07.3',
             scan: state.scanner
                 ? {
                       id: 'c'.repeat(64),
-                      scopeVersion: 'targeted-v1',
+                      scopeVersion: 'manual-v2',
+                      outdated: false,
+                      locations: state.scanLocations,
                       includeArchives: state.scanArchives,
                       reused: 2,
                       status: state.scanner,
@@ -204,7 +193,6 @@ const server = http.createServer(async (request, response) => {
                                 .map((f) => ({
                                     ...f,
                                     fingerprint: 'e'.repeat(64),
-                                    approved: state.approved === f.file,
                                 }))
                           : [],
                       findingCount: done ? 3 : 0,
@@ -214,7 +202,7 @@ const server = http.createServer(async (request, response) => {
                       message: done
                           ? 'Scan finished. Findings need review; no static scanner can prove that a server is safe.'
                           : '',
-                      rulesVersion: '2026.11.07.2',
+                      rulesVersion: '2026.11.07.3',
                   }
                 : null,
         });
@@ -555,7 +543,13 @@ const server = http.createServer(async (request, response) => {
         results.push('read-only customers do not see mutating controls');
         await load('scanner');
         assert.equal(await evaluate('document.querySelector("#scan-archives").checked'), false);
+        assert.equal(
+            state.requests.some((r) => r.path.endsWith('/scanner/start')),
+            false
+        );
+        assert(await evaluate('document.body.textContent.includes("Manual scans only")'));
         await click('Start scan');
+        assert.deepEqual(state.scanLocations, ['/garrysmod/addons']);
         assert.equal(state.scanArchives, false);
         await waitFor('document.body.textContent.includes("Scan finished")');
         assert(await evaluate('document.body.textContent.includes("CRITICAL")'));
@@ -576,43 +570,54 @@ const server = http.createServer(async (request, response) => {
         assert.equal(state.requests.filter((r) => r.path.endsWith('/scanner/start')).length, scansStarted);
         assert(await evaluate('document.documentElement.scrollWidth<=window.innerWidth'));
         await screenshot('scanner-mobile.png');
-        results.push('scanner filters, optional low indicators, saved report/manual refresh and mobile overflow');
+        results.push('scanner filters, optional review indicators, saved report/manual refresh and mobile overflow');
         await evaluate('document.querySelector("#scan-archives").click()');
         await click('Run a new scan');
         await waitFor('document.body.textContent.includes("Scan finished")');
         assert.equal(state.scanArchives, true);
         await waitFor('document.body.textContent.includes("packed.gma")');
-        await click('Approve this exact file for starts');
-        await waitFor('document.body.textContent.includes("This exact file version is approved")');
-        assert.equal(state.approved, '/garrysmod/addons/example/lua/server.lua');
-        results.push('targeted scan defaults, explicit packed mode, reused results and exact-file approval');
-        const beforePower = state.requests.filter((r) => r.path.endsWith('/power')).length;
+        results.push('manual default selects only addons; archives require explicit opt-in');
+        const beforePower = state.requests.length;
+        const native = await evaluate(
+            `(() => { const sent=[];window.toolkitSocket.socket={json:message=>sent.push(message)};for(const signal of ['start','restart','stop','kill'])window.toolkitSocket.send('set state',signal);return sent; })()`
+        );
+        assert.deepEqual(
+            native,
+            ['start', 'restart', 'stop', 'kill'].map((signal) => ({ event: 'set state', args: [signal] }))
+        );
+        assert.equal(
+            state.requests.slice(beforePower).some((r) => r.method === 'POST'),
+            false
+        );
+        results.push('native shared websocket sends power directly without scanner or HTTP interception');
         await evaluate(
-            `window.toolkitSocket.setToken('e30.' + btoa(JSON.stringify({server_uuid:'12345678-1234-1234-1234-123456789abc',permissions:['gmod.toolkit.guarded-power']})) + '.fixture').send('set state','start')`
+            '[...document.querySelectorAll("fieldset input[type=checkbox]")].filter(e=>e.checked).forEach(e=>e.click())'
         );
-        for (
-            let attempt = 0;
-            attempt < 30 && state.requests.filter((r) => r.path.endsWith('/power')).length === beforePower;
-            ++attempt
-        )
-            await pause(100);
-        assert.equal(state.requests.filter((r) => r.path.endsWith('/power')).length, beforePower + 1);
-        assert.equal(state.requests.filter((r) => r.path.endsWith('/power')).at(-1).body.signal, 'start');
-        await evaluate(
-            `window.toolkitSocket.setToken('e30.' + btoa(JSON.stringify({server_uuid:'12345678-1234-1234-1234-123456789abc',permissions:['*']})) + '.fixture').send('set state','start')`
-        );
-        await pause(100);
-        assert.equal(state.requests.filter((r) => r.path.endsWith('/power')).length, beforePower + 1);
-        results.push(
-            'actual shared websocket bridge routes guarded power through the Panel and leaves other servers unchanged'
-        );
-        await click('Refresh results');
-        await click('Cancel queued start');
-        await waitFor('document.body.textContent.includes("Queued start/restart cancelled")');
-        results.push('queued start can be cancelled before Wings receives a power command');
+        await value('#scan-specific', '/garrysmod/addons/my_addon/lua');
         await click('Run a new scan');
         await click('Cancel scan');
         await waitFor('document.body.textContent.includes("cancelled")');
+        assert.deepEqual(state.scanLocations, ['/garrysmod/addons/my_addon/lua']);
+        await click('Disable scanner');
+        await waitFor('document.body.textContent.includes("The scanner is disabled")');
+        assert(
+            await evaluate(
+                '[...document.querySelectorAll("button")].find(e=>e.textContent.trim()==="Run a new scan").disabled'
+            )
+        );
+        const beforeEnable = state.requests.filter((r) => r.path.endsWith('/scanner/start')).length;
+        await click('Enable scanner');
+        await waitFor('document.body.textContent.includes("Manual scanner enabled")');
+        assert.equal(state.requests.filter((r) => r.path.endsWith('/scanner/start')).length, beforeEnable);
+        await load('scanner&readonly');
+        await waitFor('document.body.textContent.includes("Manual scans only")');
+        assert.equal(
+            await evaluate(
+                '[...document.querySelectorAll("button")].some(e=>e.textContent.includes("Disable scanner"))'
+            ),
+            false
+        );
+        results.push('specific folder selection, cancellation, enable/disable and read-only settings');
         assert(state.requests.every((r) => !/delete|quarantine|execute/.test(r.path)));
         results.push('scanner cancellation and no automatic code execution, deletion or quarantine endpoints');
         assert(state.requests.every((request) => !request.path.includes('/files/write')));

@@ -14,7 +14,7 @@ import tempfile
 import zlib
 from dataclasses import dataclass
 
-RULES_VERSION = '2026.11.07.2'
+RULES_VERSION = '2026.11.07.3'
 MAX_SCRIPT = 2 * 1024 * 1024
 MAX_ARCHIVE = 1024 * 1024 * 1024
 MAX_FINDINGS = 30
@@ -175,6 +175,85 @@ def analyze(raw, member=''):
         i = j
         if len(calls) > 5000:
             raise ValueError('Script exceeds the static call-analysis limit.')
+    # Track lexical function boundaries so another callback's input/guard cannot
+    # be attributed to this one. This is intentionally a limited static analysis.
+    functions = []
+    blocks = []
+    for index, token in enumerate(tokens):
+        value = values[index]
+        if value in {'function', 'if', 'do', 'repeat'}:
+            item = {'kind': value, 'start': index}
+            if value == 'function':
+                opening = index + 1
+                while opening < len(tokens) and values[opening] != '(':
+                    opening += 1
+                if opening in ends:
+                    item.update(body=ends[opening] + 1,
+                                params=[t.value for t in tokens[opening + 1:ends[opening]] if t.kind == 'id'])
+            blocks.append(item)
+        elif value in {'end', 'until'} and blocks:
+            item = blocks.pop()
+            if item['kind'] == 'function' and 'body' in item:
+                item['end'] = index; functions.append(item)
+
+    function_starts = {f['start']: f for f in functions}
+    function_ends = {f['end'] for f in functions}
+    owners = []; nesting = []
+    for index in range(len(tokens)):
+        owners.append(nesting[-1] if nesting else None)
+        if index in function_starts: nesting.append(function_starts[index])
+        if index in function_ends and nesting: nesting.pop()
+
+    def owner(position): return owners[position]
+
+    def callbacks(call):
+        found = [f for f in functions if call['open'] < f['start'] < f['end'] < call['end']]
+        return sorted([f for f in found if not any(g['start'] < f['start'] < g['end'] for g in found)], key=lambda f: f['start'])
+
+    handlers = []
+    for call in calls:
+        if call['name'] in {'concommand.Add', 'net.Receive'}:
+            found = callbacks(call)
+            if found:
+                function = found[0]; params = function['params']
+                sender = params[0 if call['name'] == 'concommand.Add' else 1] if len(params) >= (1 if call['name'] == 'concommand.Add' else 2) else None
+                guarded = False
+                if sender:
+                    body = values[function['body']:function['end']]
+                    # Only a first-statement, terminating check on the actual
+                    # sender counts; checks elsewhere/nested in the file do not.
+                    for rank in ('IsAdmin', 'IsSuperAdmin'):
+                        for neg in ('not', '!'):
+                            checks = [
+                                ['if', neg, sender, ':', rank, '(', ')', 'then', 'return', 'end'],
+                                ['if', 'IsValid', '(', sender, ')', 'and', neg, sender, ':', rank, '(', ')', 'then', 'return', 'end'],
+                                ['if', neg, 'IsValid', '(', sender, ')', 'or', neg, sender, ':', rank, '(', ')', 'then', 'return', 'end'],
+                            ]
+                            guarded |= any(body[:len(check)] == check for check in checks)
+                handlers.append((call, function, guarded))
+
+    def handler_for(position):
+        function = owner(position)
+        return next((h for h in handlers if h[1] is function), None)
+
+    assignments = {}
+    calls_at = {c['start']: c for c in calls}
+    for index in range(len(tokens) - 1):
+        if tokens[index].kind == 'id' and values[index + 1] == '=':
+            function = owner(index)
+            assignments.setdefault((function['start'] if function else -1, tokens[index].value), []).append(index)
+
+    def assigned_from(variable, position, names):
+        function = owner(position)
+        found = assignments.get((function['start'] if function else -1, variable), [])
+        preceding = [index for index in found if index < position]
+        return bool(preceding and calls_at.get(preceding[-1] + 2, {}).get('name') in names)
+
+    def uses_input(sink, function, parameters):
+        if owner(sink['start']) is not function: return False
+        identifiers = [t.value for t in tokens[sink['open'] + 1:sink['end']] if t.kind == 'id']
+        return any(parameter in identifiers and not any(tokens[i].value == parameter and values[i + 1] == '=' for i in range(function['body'], sink['start'] - 1)) for parameter in parameters)
+
     seen = set()
     sources = {}
     for call in calls:
@@ -208,30 +287,40 @@ def analyze(raw, member=''):
             if name in indirect_exec or re.search(r'_G\s*\[|\\(?:[0-9]{2,3}|x[0-9a-fA-F]{2})|string\s*\.\s*(?:char|reverse)', lines[min(line - 1, len(lines) - 1)]):
                 add('indirect-execution', 'high', 'Indirect or encoded execution call', 'The scanner resolved a concealed or indexed Lua execution function. Review its argument and authorization; literal folding does not evaluate Lua.', line, name)
             direct = inside(call, NETWORK)
-            variables = [sources[t.value][0] for t in args if t.kind == 'id' and t.value in sources and sources[t.value][1] < call['start']]
+            variables = [source for source in NETWORK | {'file.Read'} if any(t.kind == 'id' and assigned_from(t.value, call['start'], {source}) for t in args)]
+            handler = handler_for(call['start'])
+            guarded = handler is not None and handler[2]
             if direct:
-                add('network-execution', 'critical', 'Network input is executed as Lua', 'A network read feeds a Lua execution function. An exposed server receiver can give its sender control of the server.', line, direct[0]['name'] + ' → ' + name)
+                add('network-execution', 'medium' if guarded else 'critical', 'Network input is executed as Lua', 'A network read feeds a Lua execution function. ' + ('A terminating admin guard was found in this callback; verify intended use.' if guarded else 'An exposed server receiver can give its sender control of the server.'), line, direct[0]['name'] + ' → ' + name)
             elif any(value in NETWORK for value in variables):
-                add('network-execution', 'high', 'Network-derived value may execute as Lua', 'A simple assignment links a network-read variable to Lua execution. Review scope and sender authorization; this limited analysis is not a complete data-flow proof.', line)
+                add('network-execution', 'medium' if guarded else 'high', 'Network-derived value may execute as Lua', 'A simple assignment links a network-read variable to Lua execution. ' + ('A terminating admin guard was found in this callback. ' if guarded else '') + 'Review scope and sender authorization; this limited analysis is not a complete data-flow proof.', line)
             elif inside(call, {'file.Read'}) or 'file.Read' in variables:
                 add('file-execution', 'high', 'File content is executed as Lua', 'Inspect who can write the loaded file. Data or material files can conceal a second-stage payload.', line)
+            elif inside(call, {'util.Base64Decode', 'util.Decompress'}):
+                add('encoded-loader', 'high', 'Decoded data reaches Lua execution', 'A decoding call is an argument to Lua execution. Inspect the decoded data and its provenance; it was never executed by this scanner.', line)
+            elif handler and uses_input(call, handler[1], handler[1]['params'][2:] if handler[0]['name'] == 'concommand.Add' else []):
+                add('remote-handler-execution', 'medium' if guarded else 'high', 'Command input reaches Lua execution', 'Command arguments reach an execution API. Check the sender authorization and intended command behavior.' + (' A terminating admin guard was found in this callback.' if guarded else ''), line, name)
             else:
                 add('dynamic-lua', 'medium', 'Dynamic Lua execution', 'This executes or compiles Lua supplied at runtime. Admin tools and legitimate loaders also use it; inspect the source of the value.', line, name)
         if name in HTTP:
             sinks = inside(call, EXEC | {'SendLua'})
-            # Passing RunString directly as a callback also executes response data.
-            callback = any(t.kind == 'id' and aliases.get(t.value, t.value) in EXEC for t in args)
-            if sinks or callback:
-                add('http-execution', 'high', 'Remote response may execute as Lua', 'A web request contains an execution callback. A compromised endpoint can replace its response with server code. Review the value flow; this is a heuristic.', line)
+            response_callbacks = callbacks(call)
+            flowing = []
+            for function in response_callbacks:
+                # Fetch/Post success(body, size, headers, code); HTTP success(code, body, headers).
+                params = function['params'][1:2] if name == 'HTTP' else function['params'][:1]
+                flowing.extend(sink for sink in sinks if uses_input(sink, function, params))
+            callback = any(t.kind == 'id' and aliases.get(t.value, t.value) in EXEC and owner(call['open'] + 1 + i) is owner(call['start']) for i, t in enumerate(args))
+            if flowing or callback:
+                add('http-execution', 'high', 'Remote response reaches Lua execution', 'A response callback passes its response parameter to Lua execution, or the execution API is the callback itself. A compromised endpoint can supply code. This limited static analysis requires review.', line)
             else:
                 add('http-request', 'low', 'External HTTP request', 'HTTP requests are common in updates, loading screens and integrations. Review the destination only when other evidence makes it suspicious.', line)
             if any(re.search(r'rcon_password|sv_password|server\.cfg|users\.txt|sv\.db|password|api[_-]?key|token', t.value, re.I) for t in args if t.kind == 'str'):
                 add('possible-exfiltration', 'high', 'Web request includes potentially private data', 'Review the posted/read values for credentials, configuration or player data. The request may be a legitimate integration.', line)
         if name in {'net.Receive', 'concommand.Add'}:
-            if inside(call, EXEC):
-                add('remote-handler-execution', 'high', 'Command or network handler executes Lua', 'Verify server-side sender authorization and the value passed to execution. An admin check elsewhere in the file does not secure this callback.', line)
-            if inside(call, PRIVILEGE) or any(re.search(r'(?i)\b(?:superadmin|adduser(?:id)?|setrank|setaccess)\b', v) for v in literals):
-                add('remote-privilege', 'high', 'Remote handler can change privileges', 'Review whether the actual sender is authorized before privileges or administrative commands are changed.', line)
+            if inside(call, PRIVILEGE):
+                guarded = any(h[0] is call and h[2] for h in handlers)
+                add('remote-privilege', 'medium' if guarded else 'high', 'Remote handler can change privileges', 'Review whether the actual sender is authorized before privileges or administrative commands are changed.', line)
             if name == 'net.Receive' and any(v.lower() in HISTORICAL_CHANNELS for v in literals[:1]):
                 add('historical-channel', 'high', 'Historically reported backdoor channel', 'This registered receiver uses a channel reported in historical GMod backdoor incidents/tools. Names can be reused; verify its callback before deciding it is malicious.', line, literals[0])
         if name == 'util.AddNetworkString' and literals and literals[0].lower() in HISTORICAL_CHANNELS:
@@ -260,10 +349,10 @@ def analyze(raw, member=''):
             add('native-module', 'medium', 'Additional module loaded', 'Review the provenance of this module. A Lua scan cannot establish whether an accompanying native binary is safe.', line, literals[0])
         if name in {'util.Base64Decode', 'util.Decompress', 'string.char', 'string.reverse'}:
             if any(c['name'] in EXEC for c in calls):
-                add('encoded-loader', 'high', 'Encoded data alongside Lua execution', 'Encoding and execution occur in this script. Check whether the decoded value reaches execution; they may belong to separate legitimate code paths.', line)
+                add('encoded-loader', 'medium', 'Encoded data alongside Lua execution', 'Encoding and execution occur in this script. Check whether the decoded value reaches execution; they may belong to separate legitimate code paths.', line)
     for i in range(max(0, len(tokens) - 2)):
         if tokens[i].kind == 'id' and tokens[i].value in {'IsAdmin', 'IsSuperAdmin', 'CheckGroup', 'UserHasAccess'} and (values[i + 1:i + 3] == ['=', 'function'] or (i >= 3 and values[i - 3] == 'function' and values[i - 1] in ('.', ':'))):
-            add('authorization-override', 'high', 'Authorization function is replaced', 'Replacing an admin or permission check can grant hidden privileges. Verify the replacement and which player/metatable it affects.', tokens[i].line)
+            add('authorization-override', 'medium', 'Authorization function is replaced', 'Replacing an admin or permission check can grant hidden privileges. Verify the replacement and which player/metatable it affects.', tokens[i].line)
         if tokens[i].kind == 'str' and re.fullmatch(r'STEAM_[0-5]:[01]:[0-9]+|7656119[0-9]{10}', tokens[i].value):
             nearby = values[max(0, i - 12):min(len(tokens), i + 50)]
             if any(nearby[j:j + 2] == ['return', 'true'] for j in range(len(nearby) - 1)) and any(v in ('==', '~=', '!=') for v in nearby):

@@ -1,2 +1,0 @@
-import { EventEmitter } from 'events';
-import guardedPower from '@/components/server/gmodToolkit/PowerBridge';

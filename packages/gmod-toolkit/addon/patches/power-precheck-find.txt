@@ -1,1 +1,0 @@
-        Assert::isInstanceOf($this->server, Server::class);

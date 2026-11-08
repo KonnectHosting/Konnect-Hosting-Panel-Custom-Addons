@@ -1,2 +1,0 @@
-    send(event: string, payload?: string | string[]) {
-        if (guardedPower(this.token, event, payload, (name, message) => this.emit(name, message))) return;

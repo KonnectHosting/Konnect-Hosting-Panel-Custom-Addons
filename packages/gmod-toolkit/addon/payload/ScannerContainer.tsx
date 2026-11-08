@@ -7,7 +7,6 @@ import ToolkitPage, { useToolkit, button, secondary, box, field, formatBytes } f
 type Severity = 'critical' | 'high' | 'medium' | 'low';
 interface Finding {
     fingerprint?: string;
-    approved?: boolean;
     file: string;
     member: string;
     line: number;
@@ -19,8 +18,9 @@ interface Finding {
     context: { line: number; text: string }[];
 }
 interface Scan {
+    outdated?: boolean;
+    cancelling?: boolean;
     reused?: number;
-    powerCheck?: { status: string; signal: string; message: string } | null;
     scopeVersion?: string;
     includeArchives?: boolean;
     locations?: string[];
@@ -49,7 +49,7 @@ interface Scan {
     rulesVersion: string;
 }
 interface Status {
-    powerCheck?: { status: string; signal: string; message: string } | null;
+    enabled: boolean;
     scan: Scan | null;
     rulesVersion: string;
     locations: string[];
@@ -72,19 +72,36 @@ export default () => {
     const [page, setPage] = useState(0);
     const [archives, setArchives] = useState(false);
     const [verify, setVerify] = useState(false);
+    const [locations, setLocations] = useState<string[]>(['/garrysmod/addons']);
+    const [specific, setSpecific] = useState('');
     useEffect(() => {
-        setArchives(false);
+        try {
+            const saved = JSON.parse(localStorage.getItem(`gmod-scanner-selection:${base}`) || 'null');
+            setLocations(saved?.locations || ['/garrysmod/addons']);
+            setSpecific(saved?.specific || '');
+            setArchives(saved?.archives || false);
+        } catch {
+            setLocations(['/garrysmod/addons']);
+            setSpecific('');
+            setArchives(false);
+        }
         setVerify(false);
         setQuery('');
         setPage(0);
     }, [base]);
     const scan = status?.scan;
-    const running = scan?.status === 'running';
-    const power = status?.powerCheck || scan?.powerCheck;
+    const running = scan?.status === 'running' || scan?.status === 'cancelling';
+    const selected = [
+        ...locations.filter((path) => archives || !status?.archiveLocations?.includes(path)),
+        ...specific
+            .split('\n')
+            .map((path) => path.trim())
+            .filter(Boolean),
+    ];
     const groups = useMemo(() => {
         const filtered = (scan?.findings || []).filter(
             (finding) =>
-                (low || finding.severity !== 'low') &&
+                (low || ['critical', 'high'].includes(finding.severity)) &&
                 `${finding.file} ${finding.member} ${finding.title}`.toLowerCase().includes(query.toLowerCase())
         );
         const files = new Map<string, Finding[]>();
@@ -110,17 +127,6 @@ export default () => {
                 Find suspicious Lua, hidden privilege grants and remote code loaders in your server files and packed
                 addons.
             </p>
-            {power && (
-                <p
-                    role={'status'}
-                    className={
-                        'p-3 mb-4 rounded text-sm ' +
-                        (power.status === 'blocked' ? 'bg-red-900 text-red-100' : 'bg-blue-900 text-blue-100')
-                    }
-                >
-                    {power.message}
-                </p>
-            )}
             <section className={box}>
                 <p
                     className={
@@ -131,20 +137,100 @@ export default () => {
                     Files are never executed, changed, deleted or automatically approved. A scan with no findings does
                     not prove a server is safe.
                 </p>
+                <p role={'status'} className={'mt-4 text-sm text-blue-200'}>
+                    Manual scans only. Choose what to check, then click Start scan. Starting or restarting your server
+                    never runs a scan or waits for one.
+                </p>
+                <Can action={['file.read', 'file.read-content', 'file.create', 'file.update']}>
+                    <button
+                        className={secondary}
+                        disabled={busy || !status}
+                        onClick={() =>
+                            run(async () => {
+                                const { data } = await http.post<{ message: string }>(`${base}/scanner/settings`, {
+                                    enabled: !status?.enabled,
+                                });
+                                setNotice(data.message);
+                                await refresh();
+                            })
+                        }
+                    >
+                        {status?.enabled === false ? 'Enable scanner' : 'Disable scanner'}
+                    </button>
+                </Can>
+                {status?.enabled === false && (
+                    <p className={'mt-3 text-sm'}>The scanner is disabled for this server.</p>
+                )}
+                <fieldset disabled={busy || running || status?.enabled === false} className={'mt-4'}>
+                    <legend className={'font-semibold text-sm'}>Choose files or folders</legend>
+                    <p className={'mt-2 text-xs text-neutral-300'}>
+                        Only selected locations are searched. To check one addon, clear Addons and enter its folder
+                        below.
+                    </p>
+                    <div className={'grid gap-2 mt-3 sm:grid-cols-2'}>
+                        {(status?.locations || ['/garrysmod/addons']).map((path) => (
+                            <label key={path} className={'flex items-start gap-2 text-sm break-all'}>
+                                <input
+                                    type={'checkbox'}
+                                    checked={locations.includes(path)}
+                                    onChange={(event) =>
+                                        setLocations(
+                                            event.target.checked
+                                                ? [...locations, path]
+                                                : locations.filter((item) => item !== path)
+                                        )
+                                    }
+                                />
+                                {path}
+                            </label>
+                        ))}
+                    </div>
+                    {archives && (
+                        <div className={'grid gap-2 mt-3 sm:grid-cols-2'}>
+                            {status?.archiveLocations?.map((path) => (
+                                <label key={path} className={'flex items-start gap-2 text-sm break-all'}>
+                                    <input
+                                        type={'checkbox'}
+                                        checked={locations.includes(path)}
+                                        onChange={(event) =>
+                                            setLocations(
+                                                event.target.checked
+                                                    ? [...locations, path]
+                                                    : locations.filter((item) => item !== path)
+                                            )
+                                        }
+                                    />
+                                    {path}
+                                </label>
+                            ))}
+                        </div>
+                    )}
+                    <label htmlFor={'scan-specific'} className={'block text-sm mt-4'}>
+                        Specific files or folders (one per line)
+                    </label>
+                    <textarea
+                        id={'scan-specific'}
+                        className={field}
+                        rows={3}
+                        value={specific}
+                        onChange={(event) => setSpecific(event.target.value)}
+                        placeholder={'/garrysmod/addons/my_addon/lua\n/garrysmod/lua/autorun/server/example.lua'}
+                    />
+                </fieldset>
                 <label className={'flex items-start gap-2 mt-4 text-sm'}>
                     <input
                         id={'scan-archives'}
                         type={'checkbox'}
                         className={'mt-1'}
                         checked={archives}
-                        disabled={busy || running}
+                        disabled={busy || running || status?.enabled === false}
                         onChange={(event) => setArchives(event.target.checked)}
                     />
                     <span>
-                        Include packed addons and Workshop archives
+                        Inspect packed addons in selected folders
                         <span className={'block text-xs text-neutral-300 mt-1'}>
                             Optional: Wings must transfer entire archives, including their assets. Loose code is
-                            inspected first; archive work has a separate budget.
+                            inspected first. Select cache folders above only if you want them checked.
                         </span>
                     </span>
                 </label>
@@ -154,7 +240,7 @@ export default () => {
                         type={'checkbox'}
                         className={'mt-1'}
                         checked={verify}
-                        disabled={busy || running}
+                        disabled={busy || running || status?.enabled === false}
                         onChange={(event) => setVerify(event.target.checked)}
                     />
                     <span>
@@ -168,18 +254,28 @@ export default () => {
                 <div className={'flex flex-wrap items-center mt-3'}>
                     <button
                         className={button}
-                        disabled={busy || running || !status}
+                        disabled={busy || running || !status || !status.enabled || selected.length === 0}
                         onClick={() =>
                             run(async () => {
-                                await http.post(`${base}/scanner/start`, { archives, verify });
+                                await http.post(`${base}/scanner/start`, { archives, verify, locations: selected });
+                                localStorage.setItem(
+                                    `gmod-scanner-selection:${base}`,
+                                    JSON.stringify({ locations, specific, archives })
+                                );
                                 setPage(0);
                                 await refresh();
                             })
                         }
                     >
-                        {running ? 'Scanning…' : scan ? 'Run a new scan' : 'Start scan'}
+                        {scan?.cancelling
+                            ? 'Cancelling…'
+                            : running
+                            ? 'Scanning…'
+                            : scan
+                            ? 'Run a new scan'
+                            : 'Start scan'}
                     </button>
-                    {running && (
+                    {running && !scan?.cancelling && (
                         <button
                             className={secondary}
                             disabled={busy}
@@ -204,23 +300,6 @@ export default () => {
                     >
                         Refresh results
                     </button>
-                    {power?.status === 'pending' && (
-                        <button
-                            className={secondary}
-                            disabled={busy}
-                            onClick={() =>
-                                run(async () => {
-                                    const { data } = await http.post<{ message: string }>(
-                                        `${base}/scanner/cancel-start`
-                                    );
-                                    setNotice(data.message);
-                                    await refresh();
-                                })
-                            }
-                        >
-                            Cancel queued start
-                        </button>
-                    )}
                     {scan && (
                         <button
                             className={secondary}
@@ -242,15 +321,13 @@ export default () => {
                 <details className={'mt-4 text-sm text-neutral-300'}>
                     <summary className={'cursor-pointer'}>What is scanned and how detections work</summary>
                     <p className={'mt-3'}>
-                        After the first scan, new or modified files are checked and unchanged results are reused.
-                        Starts/restarts sent through the Panel wait for an incremental check of the selected locations.
-                        Automatic start checks verify content hashes, while reusing unchanged analysis. New
-                        high-priority findings or unreadable selected code hold the start for review. Stop/kill cancels
-                        a queued start. Direct Wings starts and live Lua execution are outside this guard.
+                        Scans run only when requested here. Unchanged results are reused on later manual scans; recheck
+                        contents if you want selected files downloaded and hashed again. Cancellation stops scanner work
+                        without changing the game server.
                     </p>
                     <p className={'mt-3'}>
-                        The default scan checks loose .lua, .txt, .cfg, .vmt, .json, .dat and .js code in these
-                        locations:
+                        Your selected folders are checked for loose .lua, .txt, .cfg, .vmt, .json, .dat and .js code in
+                        these locations:
                     </p>
                     <ul className={'mt-2 space-y-1 text-xs font-mono break-all'}>
                         {status?.locations?.map((path) => (
@@ -258,7 +335,8 @@ export default () => {
                         ))}
                     </ul>
                     <p className={'mt-3'}>
-                        Packed-addon mode also checks GMA archives in those folders and these known Workshop caches:
+                        Packed-addon mode checks GMA archives only in selected folders. Optional Workshop cache
+                        locations:
                     </p>
                     <ul className={'mt-2 space-y-1 text-xs font-mono break-all'}>
                         {status?.archiveLocations?.map((path) => (
@@ -295,15 +373,16 @@ export default () => {
                     <h2 className={'text-lg font-semibold capitalize'}>
                         {scan.status === 'complete' ? 'Scan finished' : scan.status}
                     </h2>
-                    {scan.scopeVersion === 'targeted-v1' ? (
+                    {!scan.outdated ? (
                         <p className={'text-sm text-neutral-300 mt-2'}>
                             {scan.includeArchives
-                                ? 'Targeted loose-code scan with packed addons enabled.'
-                                : 'Targeted loose-code scan. Packed addons and Workshop caches were not included.'}
+                                ? 'Manual scan of selected locations with packed addons enabled.'
+                                : 'Manual scan of selected locations. Packed archives were not included.'}
                         </p>
                     ) : (
                         <p role={'alert'} className={'text-sm text-yellow-200 mt-2'}>
-                            This report used the previous scan locations. Run a new targeted scan.
+                            This report used older detection rules or scan locations. Its findings are hidden. Choose
+                            locations and request a new manual scan.
                         </p>
                     )}
                     <p className={'text-sm text-neutral-300 mt-2'}>
@@ -397,7 +476,7 @@ export default () => {
                                     setPage(0);
                                 }}
                             />
-                            Show low-priority indicators
+                            Show additional review indicators (medium and low)
                         </label>
                         <p className={'text-sm text-neutral-300 mt-3'}>
                             {groups.length} matching files. Expand a file to inspect its code and explanations.
@@ -431,47 +510,6 @@ export default () => {
                                     >
                                         Open containing folder ↗
                                     </Link>
-                                    {scan.status === 'complete' &&
-                                        findings.some(
-                                            (finding) =>
-                                                !finding.approved && ['high', 'critical'].includes(finding.severity)
-                                        ) &&
-                                        findings[0].fingerprint && (
-                                            <Can
-                                                action={[
-                                                    'file.read',
-                                                    'file.read-content',
-                                                    'file.create',
-                                                    'file.update',
-                                                ]}
-                                            >
-                                                <button
-                                                    className={secondary}
-                                                    disabled={busy}
-                                                    onClick={() =>
-                                                        run(async () => {
-                                                            const { data } = await http.post<{ message: string }>(
-                                                                `${base}/scanner/approve`,
-                                                                {
-                                                                    scan: scan.id,
-                                                                    file: findings[0].file,
-                                                                    fingerprint: findings[0].fingerprint,
-                                                                }
-                                                            );
-                                                            setNotice(data.message);
-                                                            await refresh();
-                                                        })
-                                                    }
-                                                >
-                                                    Approve this exact file for starts
-                                                </button>
-                                            </Can>
-                                        )}
-                                    {findings.every((finding) => finding.approved) && (
-                                        <p className={'text-xs text-neutral-300 mt-2'}>
-                                            This exact file version was approved for start checks.
-                                        </p>
-                                    )}
                                 </div>
                                 {findings.map((finding, n) => (
                                     <div key={n} className={'p-3 border-t border-neutral-600'}>
@@ -520,7 +558,7 @@ export default () => {
                             <p className={'py-6 text-neutral-300 text-sm'}>
                                 {scan.findingCount === 0
                                     ? 'No findings in the files inspected so far. Review coverage before drawing conclusions.'
-                                    : 'No findings match these filters. Low-priority indicators are hidden by default.'}
+                                    : 'No findings match these filters. Additional review indicators are hidden by default.'}
                             </p>
                         )}
                         {lastPage > 0 && (
