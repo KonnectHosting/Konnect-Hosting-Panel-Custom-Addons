@@ -1,0 +1,8 @@
+use Pterodactyl\Http\Middleware\RequireTwoFactorAuthentication;
+
+// Only approved immutable asset snapshots are publicly downloadable.
+Route::get('/fastdl/{token}/{path}', \Pterodactyl\Addons\GmodToolkit\DownloadController::class)
+    ->where('token', '[a-f0-9]{64}')->where('path', '.+')
+    ->withoutMiddleware(['auth.session', RequireTwoFactorAuthentication::class])
+    ->middleware(\Pterodactyl\Addons\GmodToolkit\Enabled::class)
+    ->name('gmod-toolkit.fastdl');
