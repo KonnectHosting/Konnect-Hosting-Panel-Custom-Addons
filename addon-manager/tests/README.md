@@ -57,8 +57,15 @@ exit nonzero. The simulated API checks client behavior; the separate Laravel sui
 checks actual middleware and database behavior. Browser fixtures and outputs are
 excluded from the manager release ZIP.
 
-The separate Laravel suite uses the actual Panel HTTP kernel and database from an
-installed disposable fixture with its locked Composer dependencies:
+The focused job-dispatch regression uses an installed disposable fixture's real Laravel container,
+a recording dispatcher and temporary private registry. It needs no queue service
+and never executes an addon handler:
+
+```sh
+ADDON_MANAGER_ALLOW_DISPOSABLE_TESTS=1 php addon-manager/tests/JobDispatchIntegration.php /absolute/path/to/disposable/panel
+```
+
+The complete Laravel suite uses the fixture's actual Panel HTTP kernel and database:
 
 ```sh
 ADDON_MANAGER_TEST_PANEL_ROOT=/absolute/path/to/disposable/panel \

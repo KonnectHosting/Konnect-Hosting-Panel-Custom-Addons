@@ -1,0 +1,19 @@
+    Route::get('/resources', Client\Servers\ResourceUtilizationController::class)->name('api:client:server.resources');
+
+    // GMod Toolkit: retains the enclosing authenticated, per-server middleware.
+    Route::prefix('/gmod-toolkit')->middleware(\Pterodactyl\Addons\GmodToolkit\Enabled::class)->group(function () {
+        Route::get('/', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'status']);
+        Route::get('/workshop', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'workshopStatus']);
+        Route::get('/fastdl', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdlStatus']);
+        Route::get('/workshop/cover', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'cover']);
+        Route::get('/scanner', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'status']);
+        Route::post('/scanner/start', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'start']);
+        Route::post('/scanner/cancel', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'cancel']);
+        Route::post('/scanner/settings', [\Pterodactyl\Addons\GmodToolkit\ScannerController::class, 'settings']);
+        Route::post('/workshop/selection', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'selection']);
+        Route::post('/fastdl/addon', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'buildAddon']);
+        Route::get('/fastdl/addon/{id}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'downloadAddon'])->where('id', '[a-f0-9]{64}');
+        Route::post('/workshop/preview', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'preview']);
+        Route::post('/workshop/apply', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'apply']);
+        Route::post('/fastdl/{action}', [\Pterodactyl\Addons\GmodToolkit\ToolkitController::class, 'fastdl'])->where('action', 'prepare|preview|publish|rotate|revoke');
+    });
